@@ -1,0 +1,30 @@
+{
+  "elements": [
+    {
+      "snapshotType": "SHARE_HISTORY",
+      "createdAt": "2026-08-12T09:00:00Z",
+      "shareMetadata": {
+        "commentary": "Shared our new multi-cluster RAG reference architecture - now live with 6 field teams using it.",
+        "visibility": "PUBLIC",
+        "shareUrl": "https://www.linkedin.com/posts/caldeirav_rag-activity-7234"
+      }
+    },
+    {
+      "snapshotType": "ARTICLES",
+      "createdAt": "2026-09-02T00:00:00Z",
+      "articleMetadata": {
+        "title": "Field notes: running RAG POCs in regulated industries",
+        "content": "Long-form article on running customer RAG POCs in regulated industries, with lessons from three banks.",
+        "url": "https://www.linkedin.com/pulse/field-notes-rag-pocs-caldeirav"
+      }
+    },
+    {
+      "snapshotType": "COMMENTS",
+      "createdAt": "2026-07-15T00:00:00Z",
+      "commentMetadata": {
+        "text": "Great writeup, thanks for sharing!",
+        "parentPostUrl": "https://www.linkedin.com/posts/someone-ai-gtm-activity-9999"
+      }
+    }
+  ]
+}
