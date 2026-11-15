@@ -1,0 +1,2 @@
+This is definitely not a PDF document. It exists to exercise graceful handling
+of corrupt files in the docs connector and must fail text extraction.

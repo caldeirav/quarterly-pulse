@@ -1,0 +1,23 @@
+{
+  "total_count": 2,
+  "items": [
+    {
+      "title": "Support custom schedulers in workload API",
+      "html_url": "https://github.com/kubernetes-sigs/kueue/pull/1234",
+      "state": "open",
+      "created_at": "2026-08-15T00:00:00Z",
+      "body": "Adds pluggable scheduler support to the workload admission API.",
+      "repository_url": "https://api.github.com/repos/kubernetes-sigs/kueue",
+      "pull_request": { "merged_at": "2026-08-18T00:00:00Z" }
+    },
+    {
+      "title": "GPU scheduling support",
+      "html_url": "https://github.com/upstream-project/fleet-operator/pull/42",
+      "state": "closed",
+      "created_at": "2026-08-05T00:00:00Z",
+      "body": "Duplicate of the GraphQL contribution; used to verify URL deduplication.",
+      "repository_url": "https://api.github.com/repos/upstream-project/fleet-operator",
+      "pull_request": { "merged_at": "2026-08-06T00:00:00Z" }
+    }
+  ]
+}

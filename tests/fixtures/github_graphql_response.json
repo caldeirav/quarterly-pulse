@@ -1,0 +1,118 @@
+{
+  "data": {
+    "user": {
+      "login": "caldeirav",
+      "contributionsCollection": {
+        "pullRequestContributions": {
+          "totalCount": 2,
+          "nodes": [
+            {
+              "occurredAt": "2026-08-05T10:00:00Z",
+              "pullRequest": {
+                "title": "Add GPU scheduling support to fleet operator",
+                "state": "MERGED",
+                "merged": true,
+                "url": "https://github.com/upstream-project/fleet-operator/pull/42",
+                "body": "Implements topology-aware GPU scheduling for heterogeneous node pools. Adopted in the v1.8 release.",
+                "repository": {
+                  "nameWithOwner": "upstream-project/fleet-operator",
+                  "url": "https://github.com/upstream-project/fleet-operator",
+                  "isPrivate": false
+                }
+              }
+            },
+            {
+              "occurredAt": "2026-09-12T08:30:00Z",
+              "pullRequest": {
+                "title": "Fix race in cache invalidation",
+                "state": "OPEN",
+                "merged": false,
+                "url": "https://github.com/acme-internal/platform/pull/7",
+                "body": "Race condition observed under load; adds a lease-based invalidation guard.",
+                "repository": {
+                  "nameWithOwner": "acme-internal/platform",
+                  "url": "https://github.com/acme-internal/platform",
+                  "isPrivate": true
+                }
+              }
+            }
+          ]
+        },
+        "issueContributions": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "occurredAt": "2026-08-20T00:00:00Z",
+              "issue": {
+                "title": "RFC: multi-cluster telemetry contract",
+                "state": "OPEN",
+                "url": "https://github.com/upstream-project/fleet-operator/issues/100",
+                "body": "Design proposal for a shared telemetry contract across clusters.",
+                "repository": {
+                  "nameWithOwner": "upstream-project/fleet-operator",
+                  "url": "https://github.com/upstream-project/fleet-operator"
+                }
+              }
+            }
+          ]
+        },
+        "commitContributionsByRepository": [
+          {
+            "repository": {
+              "nameWithOwner": "acme-internal/platform",
+              "url": "https://github.com/acme-internal/platform",
+              "isPrivate": true
+            },
+            "contributions": { "totalCount": 27 }
+          },
+          {
+            "repository": {
+              "nameWithOwner": "quarterly-pulse/quarterly-pulse",
+              "url": "https://github.com/quarterly-pulse/quarterly-pulse",
+              "isPrivate": false
+            },
+            "contributions": { "totalCount": 14 }
+          }
+        ],
+        "pullRequestReviewContributions": {
+          "totalCount": 3,
+          "nodes": [
+            {
+              "occurredAt": "2026-08-02T00:00:00Z",
+              "pullRequest": {
+                "title": "Harden e2e tests",
+                "url": "https://github.com/upstream-project/fleet-operator/pull/38",
+                "repository": {
+                  "nameWithOwner": "upstream-project/fleet-operator",
+                  "url": "https://github.com/upstream-project/fleet-operator"
+                }
+              }
+            },
+            {
+              "occurredAt": "2026-08-10T00:00:00Z",
+              "pullRequest": {
+                "title": "Bump dependencies",
+                "url": "https://github.com/upstream-project/fleet-operator/pull/40",
+                "repository": {
+                  "nameWithOwner": "upstream-project/fleet-operator",
+                  "url": "https://github.com/upstream-project/fleet-operator"
+                }
+              }
+            },
+            {
+              "occurredAt": "2026-09-01T00:00:00Z",
+              "pullRequest": {
+                "title": "Refactor auth middleware",
+                "url": "https://github.com/acme-internal/platform/pull/12",
+                "repository": {
+                  "nameWithOwner": "acme-internal/platform",
+                  "url": "https://github.com/acme-internal/platform"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

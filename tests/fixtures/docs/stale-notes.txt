@@ -1,0 +1,2 @@
+Stale notes from an earlier cycle. No dates inside the reporting window and
+an old modification time, so this file must be excluded from the report.
