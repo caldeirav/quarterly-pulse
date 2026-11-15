@@ -13,6 +13,8 @@ import pytest
 
 from quarterly_pulse.config import Settings
 
+from tests.fakes import StructuredFakeChatModel
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
@@ -43,6 +45,16 @@ def make_settings(monkeypatch: pytest.MonkeyPatch):
         return Settings(_env_file=None, **kwargs)  # type: ignore[arg-type]
 
     return _factory
+
+
+# ---------------------------------------------------------------------------
+# Deterministic fake chat model with scripted structured outputs
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def fake_model() -> StructuredFakeChatModel:
+    return StructuredFakeChatModel(responses=["unused"])
 
 
 def _set_mtime(path: Path, day: date, hour: int = 12) -> None:
