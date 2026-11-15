@@ -27,6 +27,7 @@ from typing import Annotated, Optional
 
 import typer
 from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
 
 from quarterly_pulse.config import Settings
 from quarterly_pulse.connectors.docs import fetch_docs_activity
@@ -242,7 +243,7 @@ def _apply_overrides(
     return TemplateProfile(**data)
 
 
-def _init_model(model_id: str, settings: Settings):  # noqa: ANN202 - langchain model type
+def _init_model(model_id: str, settings: Settings) -> BaseChatModel:
     """Build the chat model, failing loudly with an actionable message."""
     _export_provider_keys(settings)
     provider = model_id.split(":", 1)[0].lower() if ":" in model_id else "openai"
