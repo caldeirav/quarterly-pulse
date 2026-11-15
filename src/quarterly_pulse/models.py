@@ -50,6 +50,10 @@ class SectionSpec(BaseModel):
     heading: str = Field(description="Verbatim heading line, e.g. '## 6\\\\. Custom Workstream: ...'.")
     title: str = Field(description="Unescaped heading title text.")
     helper_prompt: str | None = Field(default=None, description="Verbatim italic helper prompt line.")
+    preamble: list[str] = Field(
+        default_factory=list,
+        description="Verbatim lines between the heading and the table (blank lines, helper prompt).",
+    )
     columns: list[str] = Field(default_factory=list, description="Cleaned column header labels.")
     header_row: str = Field(description="Verbatim table header row.")
     separator_row: str | None = Field(default=None, description="Verbatim table separator row, if present.")

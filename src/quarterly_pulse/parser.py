@@ -159,6 +159,7 @@ def _parse_content_section(
         heading=raw_heading,
         title=_heading_title(raw_heading),
         helper_prompt=helper_prompt,
+        preamble=preamble,
         columns=columns,
         header_row=header_row,
         separator_row=separator_row,
