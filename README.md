@@ -110,8 +110,8 @@ All configuration is environment-driven (process env or `.env`):
   data keep their copy/paste placeholders for manual completion.
 - Section 6's `*<Rename or Copy/Paste Table for Extra Categories>*` heading is
   renamed by the LLM when content lands there.
-- Sections 8/9 are populated only when the sources contain explicit
-  forward-looking commitments or escalations.
+- Sections 8/9 contain LLM-proposed recommendations for next quarter and for
+  help needed, derived from the gathered activity, for manual editing.
 - A collapsible `<details>` audit footer records sources queried, strategies
   used, item counts, deduplication stats, the model, empty sections, and any
   fallback warnings or grounding fixes.

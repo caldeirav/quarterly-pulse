@@ -32,10 +32,12 @@ from pydantic import BaseModel, Field
 
 from quarterly_pulse.models import ActivityItem, TemplateProfile
 
-#: Character budgets guarding the model context window.
-_CONTEXT_CHAR_BUDGET = 60_000
-_CHUNK_CHAR_BUDGET = 20_000
-_SUMMARY_CLIP = 600
+#: Character budgets guarding the model context window. Generous on purpose:
+#: the chunked pre-summarization path is lossy, so it should only engage for
+#: genuinely huge quarters (gpt-4o / claude-sonnet both handle 128k+ tokens).
+_CONTEXT_CHAR_BUDGET = 150_000
+_CHUNK_CHAR_BUDGET = 50_000
+_SUMMARY_CLIP = 1000
 _IMPACT_CLIP = 200
 _RAW_CONTEXT_CLIP = 1500
 
@@ -45,14 +47,18 @@ STRICT GROUNDING RULES:
 - Use ONLY facts, customer names, metrics, numbers, dates, and URLs that appear in the provided activity records.
 - NEVER fabricate or guess customer names, metrics, or URLs. If no link exists in the records, leave the links cell empty.
 - Prefer concrete outcomes, counts, and statuses found in the records over generic phrasing.
-- Keep each cell concise: at most about 30 words of plain text, no Markdown formatting inside cells.
-- Section 8 (Looking Ahead) and Section 9 (Help Needed & Team Radar) must contain rows ONLY when the records explicitly mention forward-looking commitments, roadmap items, or escalations. Otherwise return empty lists.
+- Keep each cell concise: at most about 40 words of plain text, no Markdown formatting inside cells.
 - Set section_6_title only when section 6 rows exist, deriving a short title from their content (e.g. "Research & Internal Tooling").
 
 COMPLETENESS RULES:
 - GitHub records arrive pre-aggregated per repository: render exactly ONE row per GitHub repository item, citing the repository URL and the most notable PR/issue links from its raw_context.
 - Include EVERY LinkedIn post and EVERY local document record as its own row in the appropriate section; merge only exact duplicates of the same underlying item. NEVER drop or consolidate records merely because there are many of them.
 - When merging duplicates that describe the same underlying work, keep the richest description and all distinct links.
+
+ROW CONTENT RULES:
+- LinkedIn posts: use the post's own headline or opening line as the row title (never prefix it with "LinkedIn"). Write a 2-3 sentence summary that explains what the post is about AND, when the post coincides with presenting at, moderating, or attending an event, name the event and the talk. Include reaction/comment counts when available.
+- Local documents: classify each document into Section 3 (repeatable solution templates & reusable assets), Section 4 (customer-specific opportunities & field work), or Section 6 (custom workstream) unless it clearly belongs elsewhere. Use the document's own title as the row title and summarize its actual content in 1-3 sentences.
+- Section 8 (Looking Ahead) and Section 9 (Help Needed & Team Radar): PROPOSE concrete recommendations derived from the records — work with momentum to continue or ship next quarter, customer engagements to follow up, emerging opportunities, activities to stop or deprioritize, and plausible escalations or decisions where leadership help is needed. These are suggestions the contributor will edit manually; never invent URLs, owners, dates, or metrics that are not in the records.
 
 SECTION MAPPING GUIDE:
 - Section 2, Open Source & Upstream Contributions: upstream PRs, commits, issues/RFCs, maintainership, community leadership.
@@ -61,8 +67,8 @@ SECTION MAPPING GUIDE:
 - Section 5, Executive, Partner & Industry Engagements: talks, webinars, LinkedIn posts/articles, EBC briefings, partner co-builds, product RFEs.
 - Section 6, Custom Workstream: meaningful overflow work such as research spikes, internal tooling, standards bodies, mentoring.
 - Section 7, Challenges, Friction & Mitigations: blockers, slipped timelines, or dependency issues evidenced in the records.
-- Section 8, Looking Ahead: explicit next-quarter commitments only (Must-Win Priority / Emerging Opportunity / Stop / Deprioritize).
-- Section 9, Help Needed & Team Radar: escalations needing leadership or cross-team decisions, plus dates and context the team should know."""
+- Section 8, Looking Ahead: recommended next-quarter commitments and suggestions (Must-Win Priority / Emerging Opportunity / Stop / Deprioritize).
+- Section 9, Help Needed & Team Radar: suggested escalations, decisions needing leadership input, and dates and context the team should know."""
 
 FINAL_PROMPT = ChatPromptTemplate.from_messages(
     [

@@ -128,6 +128,10 @@ class TestSynthesizeReport:
         assert "NEVER fabricate" in system
         assert "ONE row per GitHub repository" in system
         assert "EVERY LinkedIn post" in system
+        assert 'never prefix it with "LinkedIn"' in system
+        assert "coincides with presenting" in system
+        assert "unless it clearly belongs elsewhere" in system  # docs default routing
+        assert "PROPOSE concrete recommendations" in system  # sections 8/9 suggestions
         assert "Vincent Caldeira, CTO APAC" in human
         assert "caldeirav" in human
         assert "upstream-project/fleet-operator/pull/42" in human
