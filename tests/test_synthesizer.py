@@ -151,6 +151,10 @@ class TestSynthesizeReport:
         assert 'never prefixed with "LinkedIn"' in system
         assert "Do not mention reaction" in system
         assert "ONE row PER event or location" in system
+        assert "FIRST ask whether the post announces, follows, or recaps an event" in system
+        assert "event-related posts belong in Section 5" in system
+        assert "must NEVER land in Section 6" in system
+        assert 'tagged "event-related post"' in system
         assert "Never use a sentence quoted or clipped from the source text" in system
         assert "use its description from the record" in system
         assert "Summit Connect" in system

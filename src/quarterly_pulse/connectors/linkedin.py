@@ -53,6 +53,15 @@ EXA_SEARCH_URL = "https://api.exa.ai/search"
 
 _EXPORT_DIR_HINTS = ("linkedin",)
 _EXPORT_MARKER_FILES = ("Shares.csv", "Positions.csv", "Connections.csv")
+
+#: Posts matching these markers announce, follow, or recap an event; the tag
+#: they produce steers the synthesizer towards Sections 4/5 instead of 6.
+_EVENT_HINT_RE = re.compile(
+    r"\b(?:spoke|spoken|speaking|speaker|presented|presenting|presentation|keynote|"
+    r"panel|webinar|conference|summit|meetup|forum|booth|fireside|roundtable|"
+    r"recap|attended|moderated|moderating|hosted|talk|session|deck|slides)\b",
+    re.IGNORECASE,
+)
 _TEXT_CLIP = 900
 #: Max length for a post's extracted title sentence.
 _TITLE_CLIP = 140
@@ -577,7 +586,8 @@ def _records_to_items(records: list[ShareRecord], start_date: date, end_date: da
                 summary=_clip(record.text, _TEXT_CLIP),
                 impact="",
                 url=_clean_share_url(record.url),
-                raw_context=f"linkedin {record.kind}: {label}",
+                raw_context=f"linkedin {record.kind}: {label}"
+                + ("; event-related post" if _EVENT_HINT_RE.search(record.text) else ""),
             )
         )
     return items

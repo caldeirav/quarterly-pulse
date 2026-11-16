@@ -443,3 +443,38 @@ class TestItemShape:
         records = [ShareRecord(kind="post", occurred_at="2026-08-30 10:00", text=long_text)]
         items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
         assert 850 <= len(items[0].summary) <= 910  # clipped near the 900-char budget
+
+
+class TestEventHintTagging:
+    def test_event_posts_tagged_in_raw_context(self) -> None:
+        records = [
+            ShareRecord(
+                kind="post",
+                occurred_at="2026-09-02 10:00",
+                text="Great panel at OSFF NYC yesterday — thanks for the sharp questions!",
+            )
+        ]
+        items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
+        assert "event-related post" in items[0].raw_context
+
+    def test_talk_recap_posts_tagged(self) -> None:
+        records = [
+            ShareRecord(
+                kind="post",
+                occurred_at="2026-09-05 10:00",
+                text="Sharing the deck from my Agent Substrate Day talk on circuit breakers.",
+            )
+        ]
+        items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
+        assert "event-related post" in items[0].raw_context
+
+    def test_non_event_posts_not_tagged(self) -> None:
+        records = [
+            ShareRecord(
+                kind="post",
+                occurred_at="2026-09-05 10:00",
+                text="Our multi-cluster reference architecture is now live with six field teams using it.",
+            )
+        ]
+        items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
+        assert "event-related post" not in items[0].raw_context
