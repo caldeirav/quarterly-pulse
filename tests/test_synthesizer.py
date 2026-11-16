@@ -155,6 +155,8 @@ class TestSynthesizeReport:
         assert "event-related posts belong in Section 5" in system
         assert "must NEVER land in Section 6" in system
         assert 'tagged "event-related post"' in system
+        assert 'tagged "post with attached content"' in system
+        assert "distinct posts are distinct rows" in system
         assert "Never use a sentence quoted or clipped from the source text" in system
         assert "use its description from the record" in system
         assert "Summit Connect" in system
@@ -282,6 +284,9 @@ class TestCompletenessBackstop:
         assert "left out" in retry_messages[1].content
         # The retry sees the existing draft so it can skip covered content.
         assert "Existing report draft" in retry_messages[1].content
+        # Coverage is judged strictly (same link/item), so attached-content
+        # posts about the same event still become rows.
+        assert "cites the same link" in retry_messages[1].content
 
     async def test_covered_items_go_to_footer_not_duplicate_rows(
         self, fake_model: StructuredFakeChatModel
