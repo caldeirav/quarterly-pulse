@@ -117,14 +117,57 @@ class TestThirdPartyStrategies:
     async def test_apify_actor(
         self, make_settings, monkeypatch, tmp_path: Path
     ) -> None:
+        captured: dict[str, object] = {}
+
         def fake_actor(token: str, actor_id: str, run_input: dict) -> list[dict]:
-            assert token == "apify-token"
-            assert run_input == {"profileUrls": [PROFILE_URL]}
+            captured["token"] = token
+            captured["actor"] = actor_id
+            captured["input"] = run_input
             return [
                 {
+                    "urn": "7123456789012345678",
+                    "posted_at": {"date": "2026-08-30 10:00:20", "timestamp": 1756544420000},
                     "text": "Shared our Q3 field enablement recap.",
-                    "postedAt": "2026-08-30T10:00:00Z",
                     "url": "https://www.linkedin.com/posts/caldeirav_recap-1",
+                    "stats": {"total_reactions": 42, "comments": 7},
+                }
+            ]
+
+        monkeypatch.setattr(linkedin_module, "_run_apify_actor", fake_actor)
+
+        result = await fetch_linkedin_activity(
+            PROFILE_URL, CONTRIBUTOR_NAME, START_DATE, END_DATE,
+            tmp_path, make_settings(apify_api_token="apify-token"),
+        )
+
+        assert result.strategy == "apify_actor"
+        assert captured["token"] == "apify-token"
+        assert captured["actor"] == "apimaestro/linkedin-profile-posts"
+        assert captured["input"] == {"username": "caldeirav", "page_number": 1, "limit": 100}
+        assert len(result.items) == 1
+        item = result.items[0]
+        assert item.date == date(2026, 8, 30)  # nested posted_at.date parsed
+        assert item.url == "https://www.linkedin.com/posts/caldeirav_recap-1"
+        assert "42 reactions" in item.impact
+        assert "7 comments" in item.impact
+
+    async def test_apify_wrapped_dataset_response(
+        self, make_settings, monkeypatch, tmp_path: Path
+    ) -> None:
+        def fake_actor(token: str, actor_id: str, run_input: dict) -> list[dict]:
+            return [
+                {
+                    "success": True,
+                    "data": {
+                        "posts": [
+                            {
+                                "urn": "1",
+                                "posted_at": {"date": "2026-09-02 08:00:00"},
+                                "text": "Wrapped response post.",
+                                "url": "https://www.linkedin.com/posts/caldeirav_wrapped-1",
+                            }
+                        ]
+                    },
                 }
             ]
 
@@ -137,7 +180,54 @@ class TestThirdPartyStrategies:
 
         assert result.strategy == "apify_actor"
         assert len(result.items) == 1
-        assert result.items[0].date == date(2026, 8, 30)
+        assert result.items[0].date == date(2026, 9, 2)
+
+    async def test_apify_input_override(
+        self, make_settings, monkeypatch, tmp_path: Path
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_actor(token: str, actor_id: str, run_input: dict) -> list[dict]:
+            captured["actor"] = actor_id
+            captured["input"] = run_input
+            return []
+
+        monkeypatch.setattr(linkedin_module, "_run_apify_actor", fake_actor)
+        settings = make_settings(
+            apify_api_token="apify-token",
+            apify_linkedin_actor="custom/actor",
+            apify_linkedin_input='{"username": "{username}", "total_posts": 50}',
+        )
+
+        await fetch_linkedin_activity(
+            PROFILE_URL, CONTRIBUTOR_NAME, START_DATE, END_DATE, tmp_path, settings
+        )
+
+        assert captured["actor"] == "custom/actor"
+        assert captured["input"] == {"username": "caldeirav", "total_posts": 50}
+
+    async def test_apify_failure_degrades_gracefully(
+        self, make_settings, monkeypatch, tmp_path: Path
+    ) -> None:
+        class ApifyishError(Exception):
+            """Mimics apify_client errors (not an OSError/RuntimeError/ValueError)."""
+
+        def failing_actor(token: str, actor_id: str, run_input: dict) -> list[dict]:
+            raise ApifyishError("Actor with this name was not found")
+
+        monkeypatch.setattr(linkedin_module, "_run_apify_actor", failing_actor)
+
+        result = await fetch_linkedin_activity(
+            PROFILE_URL, CONTRIBUTOR_NAME, START_DATE, END_DATE,
+            tmp_path, make_settings(apify_api_token="apify-token"),
+        )
+
+        # The pipeline must not crash; it falls through to graceful degradation.
+        assert result.strategy == "unconfigured"
+        assert result.items == []
+        warnings = " ".join(result.warnings)
+        assert "Apify LinkedIn scraper failed" in warnings
+        assert "Actor with this name was not found" in warnings
 
     @respx.mock
     async def test_scrapecreators_endpoint(

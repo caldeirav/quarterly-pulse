@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import json
 import logging
 import re
 import zipfile
@@ -43,7 +44,9 @@ PORTABILITY_URL = "https://api.linkedin.com/rest/memberSnapshotData"
 LINKEDIN_VERSION = "202411"
 SNAPSHOT_TYPES = ("SHARE_HISTORY", "ARTICLES", "COMMENTS")
 
-DEFAULT_APIFY_ACTOR = "clockworks/linkedin-profile-posts-scraper"
+#: Default Apify Actor for LinkedIn profile posts (no cookies required).
+#: Overridable via ``APIFY_LINKEDIN_ACTOR`` because Store actors come and go.
+DEFAULT_APIFY_ACTOR = "apimaestro/linkedin-profile-posts"
 SCRAPECREATORS_POSTS_URL = "https://api.scrapecreators.com/api/v1/linkedin/profile/posts"
 EXA_SEARCH_URL = "https://api.exa.ai/search"
 
@@ -62,6 +65,7 @@ class ShareRecord(BaseModel):
     text: str = ""
     url: str | None = None
     visibility: str | None = None
+    stats: str | None = None
 
 
 async def fetch_linkedin_activity(
@@ -83,7 +87,7 @@ async def fetch_linkedin_activity(
             return ConnectorResult(
                 source="linkedin", strategy="member_data_portability_api", items=items, warnings=warnings
             )
-        except (httpx.HTTPError, ValueError, KeyError) as exc:
+        except Exception as exc:  # secondary source: degrade, never crash the pipeline
             warnings.append(f"LinkedIn Member Data Portability API failed ({exc}); trying next strategy.")
     else:
         warnings.append(
@@ -99,7 +103,7 @@ async def fetch_linkedin_activity(
             return ConnectorResult(
                 source="linkedin", strategy="local_export_archive", items=items, warnings=warnings
             )
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # secondary source: degrade, never crash the pipeline
             warnings.append(f"LinkedIn export archive parsing failed ({exc}); trying next strategy.")
     else:
         warnings.append(
@@ -110,12 +114,12 @@ async def fetch_linkedin_activity(
     # c) Third-party public post APIs
     if settings.apify_api_token and profile_url:
         try:
-            records = await _fetch_via_apify(settings.apify_api_token, profile_url)
+            records = await _fetch_via_apify(settings, profile_url)
             items = _records_to_items(records, start_date, end_date)
             return ConnectorResult(
                 source="linkedin", strategy="apify_actor", items=items, warnings=warnings
             )
-        except (OSError, RuntimeError, ValueError) as exc:
+        except Exception as exc:  # secondary source: degrade, never crash the pipeline
             warnings.append(f"Apify LinkedIn scraper failed ({exc}); trying next strategy.")
     if settings.scrapecreators_api_key and profile_url:
         try:
@@ -124,7 +128,7 @@ async def fetch_linkedin_activity(
             return ConnectorResult(
                 source="linkedin", strategy="scrapecreators_api", items=items, warnings=warnings
             )
-        except (httpx.HTTPError, ValueError) as exc:
+        except Exception as exc:  # secondary source: degrade, never crash the pipeline
             warnings.append(f"ScrapeCreators LinkedIn endpoint failed ({exc}); trying next strategy.")
     if settings.exa_api_key and (contributor_name or profile_url):
         try:
@@ -135,7 +139,7 @@ async def fetch_linkedin_activity(
             return ConnectorResult(
                 source="linkedin", strategy="exa_search", items=items, warnings=warnings
             )
-        except (httpx.HTTPError, ValueError) as exc:
+        except Exception as exc:  # secondary source: degrade, never crash the pipeline
             warnings.append(f"Exa LinkedIn search failed ({exc}); trying next strategy.")
 
     # d) Graceful degradation
@@ -405,25 +409,84 @@ def _strip_tags(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def _fetch_via_apify(token: str, profile_url: str) -> list[ShareRecord]:
+async def _fetch_via_apify(settings: Settings, profile_url: str) -> list[ShareRecord]:
     """Run a LinkedIn profile-posts scraper Actor via ``apify-client``."""
-    actor_id = DEFAULT_APIFY_ACTOR
-    run_input = {"profileUrls": [profile_url]}
-    raw_items = await asyncio.to_thread(_run_apify_actor, token, actor_id, run_input)
+    run_input = _apify_run_input(profile_url, settings.apify_linkedin_input)
+    raw_items = await asyncio.to_thread(
+        _run_apify_actor, settings.apify_api_token, settings.apify_linkedin_actor, run_input
+    )
     records: list[ShareRecord] = []
-    for item in raw_items:
+    for post in _apify_post_items(raw_items):
         records.append(
             ShareRecord(
                 kind="post",
-                occurred_at=_first_key(item, "createdAt", "postedAt", "publishedAt", "timestamp"),
-                text=_first_key(item, "text", "commentary", "content"),
-                url=_first_key(item, "url", "postUrl", "post_url"),
+                occurred_at=_apify_post_date(post),
+                text=_first_key(post, "text", "commentary", "content") or "",
+                url=_first_key(post, "url", "postUrl", "post_url"),
+                stats=_apify_stats(post),
             )
         )
     return records
 
 
-def _run_apify_actor(token: str, actor_id: str, run_input: dict[str, Any]) -> list[dict[str, Any]]:
+def _apify_run_input(profile_url: str, override: str | None) -> dict[str, Any]:
+    """Build the Actor run input.
+
+    The default targets ``apimaestro/linkedin-profile-posts`` (username-based,
+    no cookies). ``APIFY_LINKEDIN_INPUT`` overrides it with raw JSON supporting
+    ``{username}`` and ``{profile_url}`` placeholders, for Actors with
+    different schemas.
+    """
+    if override:
+        rendered = override.replace("{username}", _handle_from_profile_url(profile_url)).replace(
+            "{profile_url}", profile_url
+        )
+        parsed: dict[str, Any] = json.loads(rendered)
+        return parsed
+    return {"username": _handle_from_profile_url(profile_url), "page_number": 1, "limit": 100}
+
+
+def _apify_post_items(raw_items: list[Any]) -> list[dict[str, Any]]:
+    """Normalize Apify dataset items: unwrap response wrappers, keep post objects.
+
+    Handles both shapes seen in the wild: one post per dataset item, and the
+    wrapped ``{"data": {"posts": [...]}}`` response objects.
+    """
+    posts: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        wrapped = item.get("data") if isinstance(item.get("data"), dict) else item
+        inner = wrapped.get("posts")
+        if isinstance(inner, list):
+            posts.extend(post for post in inner if isinstance(post, dict))
+        elif any(key in wrapped for key in ("text", "urn", "url")):
+            posts.append(wrapped)
+    return posts
+
+
+def _apify_post_date(post: dict[str, Any]) -> str | int | None:
+    """Extract a post date, handling the nested ``posted_at`` object shape."""
+    posted_at = post.get("posted_at")
+    if isinstance(posted_at, dict):
+        return posted_at.get("date") or posted_at.get("timestamp")
+    return _first_key(post, "createdAt", "postedAt", "publishedAt", "date", "timestamp")
+
+
+def _apify_stats(post: dict[str, Any]) -> str | None:
+    """Render engagement stats (reactions/comments) for the report's impact column."""
+    stats = post.get("stats")
+    if not isinstance(stats, dict):
+        return None
+    parts: list[str] = []
+    if stats.get("total_reactions") is not None:
+        parts.append(f"{stats['total_reactions']} reactions")
+    if stats.get("comments") is not None:
+        parts.append(f"{stats['comments']} comments")
+    return ", ".join(parts) or None
+
+
+def _run_apify_actor(token: str, actor_id: str, run_input: dict[str, Any]) -> list[Any]:
     """Synchronous Apify Actor run; separated as a module function for testability."""
     from apify_client import ApifyClient  # lazy import; optional dependency at runtime
 
@@ -431,7 +494,17 @@ def _run_apify_actor(token: str, actor_id: str, run_input: dict[str, Any]) -> li
     run = client.actor(actor_id).call(run_input=run_input)
     if run is None:
         return []
-    return list(client.dataset(run["defaultDatasetId"]).list_items().items)
+    dataset_id = _run_dataset_id(run)
+    if dataset_id is None:
+        return []
+    return list(client.dataset(dataset_id).iterate_items())
+
+
+def _run_dataset_id(run: Any) -> str | None:
+    """Extract the default dataset id from a run, tolerating key/attribute styles."""
+    if isinstance(run, dict):
+        return run.get("defaultDatasetId") or run.get("default_dataset_id")
+    return getattr(run, "defaultDatasetId", None) or getattr(run, "default_dataset_id", None)
 
 
 async def _fetch_via_scrapecreators(api_key: str, profile_url: str) -> list[ShareRecord]:
@@ -512,7 +585,8 @@ def _records_to_items(records: list[ShareRecord], start_date: date, end_date: da
                 date=occurred,
                 title=f"LinkedIn {record.kind}: {label}",
                 summary=_clip(record.text, _TEXT_CLIP),
-                impact=f"visibility: {record.visibility}" if record.visibility else "",
+                impact=record.stats
+                or (f"visibility: {record.visibility}" if record.visibility else ""),
                 url=record.url,
                 raw_context=f"linkedin {record.kind}: {label}",
             )

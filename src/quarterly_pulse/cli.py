@@ -21,9 +21,10 @@ import asyncio
 import logging
 import os
 import sys
+from collections.abc import Coroutine
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 import typer
 from langchain.chat_models import init_chat_model
@@ -222,13 +223,37 @@ async def _gather_activity(
         return await fetch_github_activity(profile.github_handle, start_date, end_date, settings)
 
     github_result, linkedin_result, docs_result = await asyncio.gather(
-        _github(),
-        fetch_linkedin_activity(
-            profile.linkedin_url, contributor_name, start_date, end_date, docs_dir, settings
+        _safe_connector("github", _github()),
+        _safe_connector(
+            "linkedin",
+            fetch_linkedin_activity(
+                profile.linkedin_url, contributor_name, start_date, end_date, docs_dir, settings
+            ),
         ),
-        fetch_docs_activity(docs_dir, start_date, end_date, exclude=exclusions),
+        _safe_connector(
+            "docs", fetch_docs_activity(docs_dir, start_date, end_date, exclude=exclusions)
+        ),
     )
     return [github_result, linkedin_result, docs_result]
+
+
+async def _safe_connector(
+    source: str, coro: Coroutine[Any, Any, ConnectorResult]
+) -> ConnectorResult:
+    """Await one connector; convert any crash into a degraded result.
+
+    Belt-and-braces for the repository's graceful-degradation contract: a bug
+    inside any connector must never take the whole pipeline down.
+    """
+    try:
+        return await coro
+    except Exception as exc:
+        logger.warning("%s connector crashed: %s", source, exc)
+        return ConnectorResult(
+            source=source,
+            strategy="failed",
+            warnings=[f"{source} connector crashed and was skipped: {exc}"],
+        )
 
 
 def _apply_overrides(
@@ -326,6 +351,11 @@ def _configure_logging() -> None:
         level=logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
+    # Third-party noise: pypdf warns about malformed PDF font metrics that do
+    # not affect text extraction, and httpx request logs duplicate the CLI's
+    # own per-source summaries (everything is recorded in the audit footer).
+    logging.getLogger("pypdf").setLevel(logging.ERROR)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 if __name__ == "__main__":

@@ -29,5 +29,7 @@ class Settings(BaseSettings):
     # --- LinkedIn fallback chain --------------------------------------------
     linkedin_access_token: str | None = None
     apify_api_token: str | None = None
+    apify_linkedin_actor: str = "apimaestro/linkedin-profile-posts"
+    apify_linkedin_input: str | None = None
     scrapecreators_api_key: str | None = None
     exa_api_key: str | None = None

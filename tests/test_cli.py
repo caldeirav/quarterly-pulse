@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from quarterly_pulse import cli as cli_module
 from quarterly_pulse.cli import app
-from quarterly_pulse.models import ActivityItem, ConnectorResult
+from quarterly_pulse.models import ActivityItem, ConnectorResult, TemplateProfile
 from quarterly_pulse.synthesizer import CustomerFieldWorkRow, QuarterReport, UpstreamContributionRow
 
 from tests.fakes import StructuredFakeChatModel
@@ -91,6 +91,7 @@ class TestEndToEndOffline:
     def test_full_run_writes_populated_report(
         self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
     ) -> None:
+        monkeypatch.chdir(tmp_path)  # keep the developer's real .env out of Settings()
         _install_fakes(monkeypatch, docs_dir, _e2e_report())
         output = tmp_path / "report.md"
 
@@ -149,6 +150,7 @@ class TestEndToEndOffline:
     def test_handle_overrides_passed_to_connectors(
         self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
     ) -> None:
+        monkeypatch.chdir(tmp_path)  # keep the developer's real .env out of Settings()
         captured: dict[str, str | None] = {}
 
         async def fake_github(handle: str, start_date: date, end_date: date, settings) -> ConnectorResult:
@@ -195,6 +197,8 @@ class TestFailLoudly:
     def test_missing_api_key_exits_nonzero(
         self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
     ) -> None:
+        # Isolate from the developer's real .env (Settings reads it from the CWD).
+        monkeypatch.chdir(tmp_path)
         for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LLM_MODEL"):
             monkeypatch.delenv(var, raising=False)
 
@@ -215,6 +219,7 @@ class TestFailLoudly:
     def test_end_date_before_start_date_rejected(
         self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
     ) -> None:
+        monkeypatch.chdir(tmp_path)  # keep the developer's real .env out of Settings()
         _install_fakes(monkeypatch, docs_dir, _e2e_report())
 
         result = runner.invoke(
@@ -230,3 +235,28 @@ class TestFailLoudly:
 
         assert result.exit_code == 2
         assert "before --start-date" in result.output
+
+
+class TestConnectorSafetyNet:
+    async def test_crashing_connector_does_not_kill_pipeline(
+        self, tmp_path: Path, monkeypatch, make_settings
+    ) -> None:
+        async def exploding(docs_dir, start_date, end_date, exclude=None):
+            raise RuntimeError("unexpected docs connector bug")
+
+        monkeypatch.setattr(cli_module, "fetch_docs_activity", exploding)
+
+        profile = cli_module._apply_overrides(
+            TemplateProfile(name_role="Vincent Caldeira, CTO APAC"), github=None, linkedin=None
+        )
+        results = await cli_module._gather_activity(
+            profile, tmp_path, date(2026, 8, 1), date(2026, 9, 30), make_settings()
+        )
+
+        assert len(results) == 3
+        github_result, linkedin_result, docs_result = results
+        assert github_result.strategy == "skipped"  # no handle in profile
+        assert linkedin_result.strategy == "unconfigured"  # no tokens, no export
+        assert docs_result.strategy == "failed"
+        assert any("crashed" in warning for warning in docs_result.warnings)
+        assert any("unexpected docs connector bug" in warning for warning in docs_result.warnings)
