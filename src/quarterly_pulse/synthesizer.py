@@ -57,8 +57,11 @@ COMPLETENESS RULES:
 - EVERY gathered item must appear somewhere in the report, even when no section fits perfectly: choose the closest plausible section, and use Section 6 (Custom Workstream) as the catch-all for overflow work. An item placed in the wrong section is far better than a missing item — the contributor re-places entries manually.
 
 ROW CONTENT RULES:
-- LinkedIn posts: use the post's own headline or opening line as the row title (never prefix it with "LinkedIn"). Write a 2-3 sentence summary that explains what the post is about AND, when the post coincides with presenting at, moderating, or attending an event, name the event and the talk. Include reaction/comment counts when available. Posts about customer-specific engagements (customer summits such as Summit Connect, executive briefings, POCs) belong in Section 4; posts about industry events, conferences, and community programs belong in Section 5.
-- Local documents: classify each document into its best-fitting section — Section 3 (repeatable solution templates & reusable assets), Section 4 (customer-specific opportunities & field work, including customer summit and briefing readouts), Section 5 (industry and community engagements, including AI Center of Excellence programs), or Section 6 (custom workstream). Use the document's own title as the row title and summarize its actual content in 1-3 sentences.
+- GitHub repository rows: lead with what the repository is and does (use its description from the record) and what the contributor actually did there; keep pull request/issue/commit counts as supporting detail only, never as the main content.
+- LinkedIn posts: use the post's own headline or opening line as the row title (never prefix it with "LinkedIn"), and write a 2-3 sentence summary drawn from the post's own content. When the post coincides with presenting at, moderating, or attending an event, name the event and the talk. Do not mention reaction, comment, or follower counts.
+- Event series (for example Summit Connect across cities, or several EBC briefings): create ONE row PER event or location. Never merge multiple events or locations into a single row.
+- Row titles must be concise, descriptive names for the activity — never a sentence quoted from the source text.
+- Local documents and email exports: classify each into its best-fitting section — Section 3 (repeatable solution templates & reusable assets), Section 4 (customer-specific opportunities & field work, including customer summit and briefing readouts), Section 5 (industry and community engagements, including AI Center of Excellence programs), or Section 6 (custom workstream). Correlate email threads with the event they concern (EBC briefings, Summit Connect and other field events) instead of listing each email as a separate entry. Use the document's own title as the row title and summarize its actual content in 1-3 sentences.
 - Section 8 (Looking Ahead) and Section 9 (Help Needed & Team Radar): PROPOSE concrete recommendations derived from the records — work with momentum to continue or ship next quarter, customer engagements to follow up, emerging opportunities, activities to stop or deprioritize, and plausible escalations or decisions where leadership help is needed. These are suggestions the contributor will edit manually; never invent URLs, owners, dates, or metrics that are not in the records.
 - Copy URLs character-for-character from the records; never shorten, paraphrase, or reconstruct them.
 
@@ -104,6 +107,29 @@ STRICT RULES:
 - Do not drop any records; the final report must include every LinkedIn post, every document, and every repository.""",
         ),
         ("human", "Activity records (JSON):\n{records}\n\nReturn the distilled records."),
+    ]
+)
+
+RETRY_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT),
+        (
+            "human",
+            """A quarterly report draft accidentally left out the activity records below. Place EACH left-out record into the correct report section, following every rule above. Give every row a concise, descriptive name for the activity (never a quoted sentence), and write proper summaries.
+
+Contributor profile:
+- Name & Role: {name_role}
+- Team / GEO: {team_geo}
+- Reporting Quarter & Year: {quarter}
+- GitHub handle: {github_handle}
+- LinkedIn profile: {linkedin_url}
+- Key Goals / OKRs: {okrs}
+
+Left-out activity records (JSON):
+{records}
+
+Return rows only for these left-out records.""",
+        ),
     ]
 )
 
@@ -297,7 +323,14 @@ async def synthesize_report(
         report = await final_chain.ainvoke(_prompt_vars(profile, records))
 
     report = _drop_empty_rows(report)
-    backfilled = _backfill_unrepresented(report, deduped)
+    backfilled = 0
+    missing = _find_unrepresented_items(report, deduped)
+    if missing:
+        # Second chance: let the model place the left-out items properly
+        # (real names, correct sections); anything still missing falls back
+        # to the deterministic Section 6 append.
+        missing = await _retry_missing_items(report, profile, missing, model)
+        backfilled = _backfill_unrepresented(report, missing)
     violations = _validate_and_sanitize_grounding(report, _allowed_urls(deduped))
     return SynthesisResult(
         report=report,
@@ -494,14 +527,13 @@ def _iter_row_fields(report: QuarterReport) -> Iterator[tuple[BaseModel, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _backfill_unrepresented(report: QuarterReport, items: list[ActivityItem]) -> int:
-    """Append items the model left out to Section 6; return how many were added.
+def _backfill_unrepresented(report: QuarterReport, missing: list[ActivityItem]) -> int:
+    """Append still-missing items to Section 6; return how many were added.
 
     The contributor prefers misplaced-but-present rows over missing
     information, so anything unrepresented is auto-added to the Custom
     Workstream catch-all, marked for manual re-placement.
     """
-    missing = _find_unrepresented_items(report, items)
     if not missing:
         return 0
     for item in missing:
@@ -518,6 +550,32 @@ def _backfill_unrepresented(report: QuarterReport, items: list[ActivityItem]) ->
     if not report.section_6_title:
         report.section_6_title = "Additional Gathered Activity"
     return len(missing)
+
+
+async def _retry_missing_items(
+    report: QuarterReport,
+    profile: TemplateProfile,
+    missing: list[ActivityItem],
+    model: BaseChatModel,
+) -> list[ActivityItem]:
+    """Give the model a second chance to place left-out items; return any still missing."""
+    try:
+        retry_chain: Runnable = RETRY_PROMPT | model.with_structured_output(QuarterReport)
+        retry_report = await retry_chain.ainvoke(
+            _prompt_vars(profile, [_compact_item(item) for item in missing])
+        )
+    except Exception:  # best effort: fall back to the deterministic backfill
+        return missing
+    _merge_report_rows(report, _drop_empty_rows(retry_report))
+    return _find_unrepresented_items(report, missing)
+
+
+def _merge_report_rows(base: QuarterReport, extra: QuarterReport) -> None:
+    """Append every row of *extra* into the matching sections of *base*."""
+    for section in _ROW_SECTIONS:
+        getattr(base, section).extend(getattr(extra, section))
+    if not base.section_6_title and extra.section_6_title:
+        base.section_6_title = extra.section_6_title
 
 
 def _find_unrepresented_items(

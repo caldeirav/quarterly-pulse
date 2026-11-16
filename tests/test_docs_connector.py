@@ -83,6 +83,34 @@ class TestFetchDocsActivity:
         assert all("secret" not in item.raw_context for item in result.items)
 
 
+class TestEmailDetection:
+    async def test_email_export_uses_subject_as_title(self, docs_dir: Path) -> None:
+        (docs_dir / "ebc-email.txt").write_text(
+            "From: organizer@redhat.com\n"
+            "To: vincent@redhat.com\n"
+            "Subject: EBC briefing with ITMX - agenda and logistics\n"
+            "Sent: Monday, August 10, 2026 9:00 AM\n"
+            "\n"
+            "Hi Vincent, confirming next week's executive briefing agenda...\n"
+        )
+
+        result = await fetch_docs_activity(docs_dir, START_DATE, END_DATE)
+
+        item = next(item for item in result.items if "ITMX" in item.title)
+        assert item.title == "EBC briefing with ITMX - agenda and logistics"
+        assert "email" in item.raw_context
+        assert "subject: EBC briefing with ITMX" in item.raw_context
+        assert "document: ebc-email.txt" in item.raw_context
+
+    async def test_non_email_documents_not_flagged(self, docs_dir: Path) -> None:
+        (docs_dir / "notes.md").write_text("# Meeting notes\n\nDiscussed the agenda for the summit.\n")
+
+        result = await fetch_docs_activity(docs_dir, START_DATE, END_DATE)
+
+        item = next(item for item in result.items if item.title == "Notes")
+        assert "email" not in item.raw_context
+
+
 class TestHelpers:
     def test_extract_urls_prefers_google_and_github(self) -> None:
         text = (

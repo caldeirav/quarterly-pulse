@@ -63,7 +63,7 @@ CONTRIBUTIONS_QUERY = """query ($handle: String!, $start: DateTime!, $end: DateT
             merged
             url
             body
-            repository { nameWithOwner url isPrivate }
+            repository { nameWithOwner url isPrivate description }
           }
         }
         pageInfo { hasNextPage endCursor }
@@ -77,20 +77,20 @@ CONTRIBUTIONS_QUERY = """query ($handle: String!, $start: DateTime!, $end: DateT
             state
             url
             body
-            repository { nameWithOwner url }
+            repository { nameWithOwner url description }
           }
         }
         pageInfo { hasNextPage endCursor }
       }
       commitContributionsByRepository(maxRepositories: 50) {
-        repository { nameWithOwner url isPrivate }
+        repository { nameWithOwner url isPrivate description }
         contributions { totalCount }
       }
       pullRequestReviewContributions(first: 100, after: $reviewAfter, orderBy: {direction: DESC}) {
         totalCount
         nodes {
           occurredAt
-          pullRequest { title url repository { nameWithOwner url } }
+          pullRequest { title url repository { nameWithOwner url description } }
         }
         pageInfo { hasNextPage endCursor }
       }
@@ -129,6 +129,12 @@ async def fetch_github_activity(
             warnings.append(
                 f"GitHub Search results truncated ({total} matching, {fetched} fetched; the API caps at 1,000)."
             )
+
+    # Defense in depth: drop anything the APIs date outside the requested
+    # window, so stale entries can never reach the report.
+    items = [
+        item for item in items if item.date is None or start_date <= item.date <= end_date
+    ]
 
     deduped = _dedupe_by_url(items)
     aggregated = _aggregate_by_repo(deduped)
@@ -400,7 +406,10 @@ def map_graphql_contributions(
                 summary=_clip(pr.get("body") or "", _SUMMARY_CLIP),
                 impact="merged" if pr.get("merged") else str(pr.get("state", "unknown")).lower(),
                 url=pr.get("url"),
-                raw_context=f"pull request by {handle} in {repo}: {pr.get('title', '')}",
+                raw_context=_repo_context(
+                    f"pull request by {handle} in {repo}: {pr.get('title', '')}",
+                    pr.get("repository"),
+                ),
             )
         )
 
@@ -418,7 +427,10 @@ def map_graphql_contributions(
                 summary=_clip(issue.get("body") or "", _SUMMARY_CLIP),
                 impact=str(issue.get("state", "unknown")).lower(),
                 url=issue.get("url"),
-                raw_context=f"issue filed by {handle} in {repo}: {issue.get('title', '')}",
+                raw_context=_repo_context(
+                    f"issue filed by {handle} in {repo}: {issue.get('title', '')}",
+                    issue.get("repository"),
+                ),
             )
         )
 
@@ -435,7 +447,9 @@ def map_graphql_contributions(
                 summary=f"{count} commits contributed during the reporting window.",
                 impact=f"{count} commits",
                 url=repo.get("url"),
-                raw_context=f"commits by {handle} in {repo.get('nameWithOwner', '')}",
+                raw_context=_repo_context(
+                    f"commits by {handle} in {repo.get('nameWithOwner', '')}", repo
+                ),
             )
         )
 
@@ -446,7 +460,14 @@ def map_graphql_contributions(
     for node in reviews.get("nodes") or []:
         pr = node.get("pullRequest") or {}
         repo = (pr.get("repository") or {}).get("nameWithOwner", "unknown/repo")
-        bucket = by_repo.setdefault(repo, {"titles": [], "url": (pr.get("repository") or {}).get("url")})
+        bucket = by_repo.setdefault(
+            repo,
+            {
+                "titles": [],
+                "url": (pr.get("repository") or {}).get("url"),
+                "description": (pr.get("repository") or {}).get("description"),
+            },
+        )
         bucket["titles"].append(pr.get("title", "untitled"))
     for repo, bucket in sorted(by_repo.items()):
         titles = bucket["titles"]
@@ -458,7 +479,10 @@ def map_graphql_contributions(
                 summary=_clip("; ".join(titles), _SUMMARY_CLIP),
                 impact=f"{len(titles)} pull requests reviewed",
                 url=bucket.get("url"),
-                raw_context=f"pull request reviews by {handle} in {repo}",
+                raw_context=_repo_context(
+                    f"pull request reviews by {handle} in {repo}",
+                    {"description": bucket.get("description")},
+                ),
             )
         )
 
@@ -493,6 +517,7 @@ def map_search_results(payload: dict[str, Any]) -> list[ActivityItem]:
 
 _REPO_URL_RE = re.compile(r"https://github\.com/([^/\s?#]+)/([^/\s?#]+)")
 _REPO_TITLE_RE = re.compile(r"\(([^()/]+/[^()/]+)\)\s*$")
+_REPO_DESC_RE = re.compile(r"repo description: (.+)")
 
 
 def _aggregate_by_repo(items: list[ActivityItem]) -> list[ActivityItem]:
@@ -552,16 +577,41 @@ def _merge_repo_group(repo: str, group: list[ActivityItem]) -> ActivityItem:
     dates = [item.date for item in group if item.date is not None]
     urls = list(dict.fromkeys(item.url for item in group if item.url))
     repo_url = f"https://github.com/{repo}"
+    description = _group_repo_description(group)
+
+    summary_body = "; ".join(highlights)
+    summary = (
+        _clip(f"Repo: {description}. {summary_body}", _REPO_SUMMARY_CLIP)
+        if description
+        else _clip(summary_body, _REPO_SUMMARY_CLIP)
+    )
 
     return ActivityItem(
         source="github",
         date=max(dates) if dates else None,
         title=f"GitHub: {repo}",
-        summary=_clip("; ".join(highlights), _REPO_SUMMARY_CLIP),
+        summary=summary,
         impact=", ".join(parts),
         url=repo_url,
         raw_context=_clip(f"repo: {repo_url}; " + "; ".join(urls), _REPO_CONTEXT_CLIP),
     )
+
+
+def _repo_context(context: str, repository: dict[str, Any] | None) -> str:
+    """Append what the repository does (its description) for report synthesis."""
+    description = (repository or {}).get("description")
+    if description:
+        return f"{context}; repo description: {str(description)[:200]}"
+    return context
+
+
+def _group_repo_description(group: list[ActivityItem]) -> str | None:
+    """The repository description carried by any item in the group."""
+    for item in group:
+        match = _REPO_DESC_RE.search(item.raw_context or "")
+        if match:
+            return match.group(1).strip()
+    return None
 
 
 def _leading_count(text: str | None) -> int:
@@ -581,9 +631,12 @@ def _gh_datetime(day: date) -> str:
 
 
 def _search_query(handle: str, start_date: date, end_date: date) -> str:
-    """Build the Search API qualifier: author + creation window."""
-    end_exclusive = (end_date + timedelta(days=1)).isoformat()
-    return f"author:{handle} created:>={start_date.isoformat()} created:<{end_exclusive}"
+    """Build the Search API qualifier: author + creation window.
+
+    Uses GitHub's inclusive ``A..B`` range syntax — repeating two ``created:``
+    qualifiers is OR'd by the API and leaks pre-window items.
+    """
+    return f"author:{handle} created:{start_date.isoformat()}..{end_date.isoformat()}"
 
 
 def _repo_from_api_url(url: str) -> str:

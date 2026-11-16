@@ -17,7 +17,8 @@
                 "repository": {
                   "nameWithOwner": "upstream-project/fleet-operator",
                   "url": "https://github.com/upstream-project/fleet-operator",
-                  "isPrivate": false
+                  "isPrivate": false,
+                  "description": "Fleet operator for heterogeneous Kubernetes clusters"
                 }
               }
             },
@@ -32,7 +33,8 @@
                 "repository": {
                   "nameWithOwner": "acme-internal/platform",
                   "url": "https://github.com/acme-internal/platform",
-                  "isPrivate": true
+                  "isPrivate": true,
+                  "description": "Internal platform services and tooling"
                 }
               }
             }
@@ -50,7 +52,8 @@
                 "body": "Design proposal for a shared telemetry contract across clusters.",
                 "repository": {
                   "nameWithOwner": "upstream-project/fleet-operator",
-                  "url": "https://github.com/upstream-project/fleet-operator"
+                  "url": "https://github.com/upstream-project/fleet-operator",
+                  "description": "Fleet operator for heterogeneous Kubernetes clusters"
                 }
               }
             }
@@ -61,17 +64,23 @@
             "repository": {
               "nameWithOwner": "acme-internal/platform",
               "url": "https://github.com/acme-internal/platform",
-              "isPrivate": true
+              "isPrivate": true,
+              "description": "Internal platform services and tooling"
             },
-            "contributions": { "totalCount": 27 }
+            "contributions": {
+              "totalCount": 27
+            }
           },
           {
             "repository": {
               "nameWithOwner": "quarterly-pulse/quarterly-pulse",
               "url": "https://github.com/quarterly-pulse/quarterly-pulse",
-              "isPrivate": false
+              "isPrivate": false,
+              "description": "Quarterly activity report generator"
             },
-            "contributions": { "totalCount": 14 }
+            "contributions": {
+              "totalCount": 14
+            }
           }
         ],
         "pullRequestReviewContributions": {
@@ -84,7 +93,8 @@
                 "url": "https://github.com/upstream-project/fleet-operator/pull/38",
                 "repository": {
                   "nameWithOwner": "upstream-project/fleet-operator",
-                  "url": "https://github.com/upstream-project/fleet-operator"
+                  "url": "https://github.com/upstream-project/fleet-operator",
+                  "description": "Fleet operator for heterogeneous Kubernetes clusters"
                 }
               }
             },
@@ -95,7 +105,8 @@
                 "url": "https://github.com/upstream-project/fleet-operator/pull/40",
                 "repository": {
                   "nameWithOwner": "upstream-project/fleet-operator",
-                  "url": "https://github.com/upstream-project/fleet-operator"
+                  "url": "https://github.com/upstream-project/fleet-operator",
+                  "description": "Fleet operator for heterogeneous Kubernetes clusters"
                 }
               }
             },
@@ -106,7 +117,8 @@
                 "url": "https://github.com/acme-internal/platform/pull/12",
                 "repository": {
                   "nameWithOwner": "acme-internal/platform",
-                  "url": "https://github.com/acme-internal/platform"
+                  "url": "https://github.com/acme-internal/platform",
+                  "description": "Internal platform services and tooling"
                 }
               }
             }

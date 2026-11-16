@@ -133,7 +133,7 @@ class TestSynthesizeReport:
 
         await synthesize_report(PROFILE, _sample_items(), fake_model)
 
-        assert len(fake_model.inputs_seen) == 1
+        assert len(fake_model.inputs_seen) >= 1
         schema_name, prompt_value = fake_model.inputs_seen[0]
         assert schema_name == "QuarterReport"
         messages = list(prompt_value.messages) if hasattr(prompt_value, "messages") else list(prompt_value)
@@ -145,9 +145,13 @@ class TestSynthesizeReport:
         assert "EVERY gathered item must appear somewhere" in system
         assert "catch-all" in system
         assert 'never prefix it with "LinkedIn"' in system
-        assert "coincides with presenting" in system
+        assert "Do not mention reaction" in system
+        assert "ONE row PER event or location" in system
+        assert "never a sentence quoted from the source text" in system
+        assert "use its description from the record" in system
         assert "Summit Connect" in system
         assert "AI Center of Excellence" in system
+        assert "Correlate email threads" in system
         assert "character-for-character" in system
         assert "PROPOSE concrete recommendations" in system  # sections 8/9 suggestions
         assert "Vincent Caldeira, CTO APAC" in human
@@ -226,10 +230,53 @@ class TestSynthesizeReport:
 
 
 class TestCompletenessBackstop:
+    async def test_retry_pass_places_missing_items_with_real_names(
+        self, fake_model: StructuredFakeChatModel
+    ) -> None:
+        """The model gets a second chance: left-out items come back as properly
+        named, correctly sectioned rows instead of raw Section 6 backfill."""
+        retry_report = QuarterReport(
+            section_2_upstream=[
+                UpstreamContributionRow(
+                    project_repo_contribution="Fleet Operator GPU scheduling",
+                    what_you_did_and_why="Merged PR adding topology-aware GPU scheduling.",
+                    links="https://github.com/upstream-project/fleet-operator/pull/42",
+                )
+            ],
+            section_5_engagements=[
+                EngagementRow(
+                    engagement_event_partner="Multi-Cluster RAG Reference Architecture announcement",
+                    activity_audience_outcome="Announced the architecture, now live with 6 field teams.",
+                    links="https://www.linkedin.com/posts/caldeirav_rag-activity-7234",
+                )
+            ],
+            section_4_customers=[
+                CustomerFieldWorkRow(
+                    customer_segment_opportunity="Acme Corp (Financial Services)",
+                    activity_and_outcome="3-week architecture sprint; technical win.",
+                    links="customer-poc-readout.md",
+                )
+            ],
+        )
+        fake_model.scripted = {"QuarterReport": [QuarterReport(), retry_report]}
+
+        result = await synthesize_report(PROFILE, _sample_items(), fake_model)
+
+        assert result.backfilled_count == 0
+        assert result.report.section_6_custom == []  # nothing needed the fallback
+        assert result.report.section_2_upstream[0].project_repo_contribution == "Fleet Operator GPU scheduling"
+        assert len(result.report.section_5_engagements) == 1
+        # Two model calls: main synthesis, then the left-out-items retry.
+        assert len(fake_model.inputs_seen) == 2
+        _, retry_prompt = fake_model.inputs_seen[1]
+        retry_messages = list(retry_prompt.messages)
+        assert "left out" in retry_messages[1].content
+
     async def test_unrepresented_items_backfilled_to_section6(
         self, fake_model: StructuredFakeChatModel
     ) -> None:
-        # The model returned an empty report; every item must still land somewhere.
+        # The model returned an empty report and the retry pass also fails
+        # (no scripted response): every item must still land somewhere.
         fake_model.scripted = {"QuarterReport": [QuarterReport()]}
 
         result = await synthesize_report(PROFILE, _sample_items(), fake_model)
@@ -317,11 +364,12 @@ class TestChunkedSynthesis:
 
         assert result.chunked is True
         assert result.items_for_synthesis == 1  # only the distilled record remains
-        # The summarize chain ran once per chunk via abatch, then the final chain once.
+        # The summarize chain ran once per chunk via abatch, then the final chain
+        # (a left-out-items retry may add one more QuarterReport call).
         schema_names = [name for name, _ in fake_model.inputs_seen]
         assert schema_names.count("DistilledActivities") == len(chunks)
-        assert schema_names.count("QuarterReport") == 1
-        # The final prompt is built from distilled records, not raw duplicates.
-        _, final_prompt = fake_model.inputs_seen[-1]
+        assert schema_names.count("QuarterReport") >= 1
+        # The final synthesis prompt is built from distilled records, not raw duplicates.
+        _, final_prompt = fake_model.inputs_seen[schema_names.index("QuarterReport")]
         messages = list(final_prompt.messages) if hasattr(final_prompt, "messages") else list(final_prompt)
         assert "Merged; adopted in v1.8." in messages[1].content
