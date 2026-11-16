@@ -306,6 +306,9 @@ def _build_audit(
     empty_sections = [
         number for number, field in SECTION_FIELDS.items() if not getattr(report, field)
     ]
+    section_row_counts = {
+        number: len(getattr(report, field)) for number, field in SECTION_FIELDS.items()
+    }
     return AuditReport(
         sources=[
             SourceAudit(
@@ -321,6 +324,8 @@ def _build_audit(
         items_after_dedup=synthesis.items_after_dedup,
         items_for_synthesis=synthesis.items_for_synthesis,
         chunked=synthesis.chunked,
+        backfilled_count=synthesis.backfilled_count,
+        section_row_counts=section_row_counts,
         empty_sections=empty_sections,
         grounding_violations=synthesis.grounding_violations,
     )

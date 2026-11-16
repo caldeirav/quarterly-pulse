@@ -146,6 +146,21 @@ def render_audit_footer(audit: AuditReport) -> str:
             f"| {source.item_count} | {escape_cell(warnings)} |"
         )
 
+    if audit.section_row_counts:
+        joined = ", ".join(
+            f"Section {number}: {count}"
+            for number, count in sorted(audit.section_row_counts.items())
+        )
+        lines.append("")
+        lines.append(f"- Report rows per section: {joined}")
+
+    if audit.backfilled_count:
+        lines.append("")
+        lines.append(
+            f"- Completeness backstop: {audit.backfilled_count} item(s) the model left out were "
+            "auto-added to Section 6 (marked 'auto-added'); re-place or edit them manually."
+        )
+
     if audit.empty_sections:
         joined = ", ".join(f"Section {number}" for number in audit.empty_sections)
         lines.append("")

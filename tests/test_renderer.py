@@ -69,6 +69,8 @@ def _audit() -> AuditReport:
         items_after_dedup=18,
         items_for_synthesis=17,
         chunked=False,
+        backfilled_count=2,
+        section_row_counts={2: 1, 4: 1, 6: 3, 8: 1},
         empty_sections=[3, 5, 7, 9],
         grounding_violations=[
             "UpstreamContributionRow.links: removed ungrounded URL https://example.com/fake"
@@ -199,6 +201,8 @@ class TestAuditFooter:
         assert "openai:gpt-4o" in footer
         assert "19 gathered / 18 after deduplication / 17 used for synthesis" in footer
         assert "chunked pre-summarization: no" in footer
+        assert "Report rows per section: Section 2: 1, Section 4: 1, Section 6: 3, Section 8: 1" in footer
+        assert "auto-added to Section 6" in footer
 
     def test_footer_lists_empty_sections_and_violations(self) -> None:
         footer = render_audit_footer(_audit())

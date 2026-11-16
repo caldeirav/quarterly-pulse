@@ -98,6 +98,8 @@ class AuditReport(BaseModel):
     items_after_dedup: int = 0
     items_for_synthesis: int = 0
     chunked: bool = False
+    backfilled_count: int = 0
+    section_row_counts: dict[int, int] = Field(default_factory=dict)
     empty_sections: list[int] = Field(default_factory=list)
     grounding_violations: list[str] = Field(default_factory=list)
     generated_at: datetime.datetime = Field(default_factory=lambda: datetime.datetime.now().astimezone())

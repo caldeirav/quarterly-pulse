@@ -98,6 +98,20 @@ class TestDeduplicateItems:
         docs = ActivityItem(source="docs", title="RAG reference arch", url="https://github.com/x/y")
         assert len(deduplicate_items([github, docs])) == 2
 
+    def test_same_title_posts_with_different_urls_survive(self) -> None:
+        # Event-series posts often share an opening line; distinct URLs must
+        # never collapse just because the title clip and date match.
+        posts = [
+            ActivityItem(
+                source="linkedin",
+                title="Summit Connect — a great event with customers and partners",
+                date=date(2026, 8, 20),
+                url=f"https://www.linkedin.com/posts/caldeirav_summit-connect-activity-{index}",
+            )
+            for index in (1, 2)
+        ]
+        assert len(deduplicate_items(posts)) == 2
+
 
 class TestSynthesizeReport:
     async def test_maps_items_via_lcel_chain(self, fake_model: StructuredFakeChatModel) -> None:
@@ -128,9 +142,13 @@ class TestSynthesizeReport:
         assert "NEVER fabricate" in system
         assert "ONE row per GitHub repository" in system
         assert "EVERY LinkedIn post" in system
+        assert "EVERY gathered item must appear somewhere" in system
+        assert "catch-all" in system
         assert 'never prefix it with "LinkedIn"' in system
         assert "coincides with presenting" in system
-        assert "unless it clearly belongs elsewhere" in system  # docs default routing
+        assert "Summit Connect" in system
+        assert "AI Center of Excellence" in system
+        assert "character-for-character" in system
         assert "PROPOSE concrete recommendations" in system  # sections 8/9 suggestions
         assert "Vincent Caldeira, CTO APAC" in human
         assert "caldeirav" in human
@@ -205,6 +223,61 @@ class TestSynthesizeReport:
         result = await synthesize_report(PROFILE, _sample_items(), fake_model)
 
         assert result.report.section_8_looking_ahead[0].type == "Must-Win Priority"
+
+
+class TestCompletenessBackstop:
+    async def test_unrepresented_items_backfilled_to_section6(
+        self, fake_model: StructuredFakeChatModel
+    ) -> None:
+        # The model returned an empty report; every item must still land somewhere.
+        fake_model.scripted = {"QuarterReport": [QuarterReport()]}
+
+        result = await synthesize_report(PROFILE, _sample_items(), fake_model)
+
+        assert result.backfilled_count == 3
+        assert len(result.report.section_6_custom) == 3
+        assert result.report.section_6_title == "Additional Gathered Activity"
+        titles = {row.initiative_activity_name for row in result.report.section_6_custom}
+        assert "PR: Add GPU scheduling support to fleet operator (upstream-project/fleet-operator)" in titles
+        assert all("auto-added" in row.what_you_did_outcome for row in result.report.section_6_custom)
+        # Injected links are grounded by construction.
+        assert result.grounding_violations == []
+
+    async def test_represented_items_not_backfilled(
+        self, fake_model: StructuredFakeChatModel
+    ) -> None:
+        # The scripted report covers the GitHub PR (by URL) and the docs item
+        # (by path); only the LinkedIn post is absent.
+        fake_model.scripted = {"QuarterReport": [_scripted_report()]}
+
+        result = await synthesize_report(PROFILE, _sample_items(), fake_model)
+
+        assert result.backfilled_count == 1
+        row = result.report.section_6_custom[0]
+        assert row.initiative_activity_name.startswith("LinkedIn post: multi-cluster RAG")
+        assert row.links == "https://www.linkedin.com/posts/caldeirav_rag-activity-7234"
+
+    async def test_truncated_url_citations_still_count_as_represented(
+        self, fake_model: StructuredFakeChatModel
+    ) -> None:
+        report = _scripted_report()
+        report.section_2_upstream[0].links = (
+            "https://github.com/upstream-project/fleet-operator/pull/4"  # truncated by the model
+        )
+        fake_model.scripted = {"QuarterReport": [report]}
+
+        result = await synthesize_report(PROFILE, _sample_items(), fake_model)
+
+        # The truncated link survives grounding ...
+        assert "pull/4" in result.report.section_2_upstream[0].links
+        assert result.grounding_violations == []
+        # ... and still counts as representing the GitHub item (no duplicate row).
+        github_rows = [
+            row
+            for row in result.report.section_6_custom
+            if "fleet-operator" in row.initiative_activity_name
+        ]
+        assert github_rows == []
 
 
 class TestChunkedSynthesis:
