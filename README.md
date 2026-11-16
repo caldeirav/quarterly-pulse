@@ -83,7 +83,9 @@ All configuration is environment-driven (process env or `.env`):
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Provider key matching `LLM_MODEL`. |
 | `GITHUB_TOKEN` | GitHub PAT for the GraphQL + Search APIs. When unset, the connector falls back to your authenticated `gh` CLI (`gh api graphql`). |
 | `LINKEDIN_ACCESS_TOKEN` | LinkedIn Member Data Portability API token (strategy a). |
-| `APIFY_API_TOKEN` | Runs a LinkedIn profile-posts scraper Actor (strategy c, first match). |
+| `APIFY_API_TOKEN` | Runs a LinkedIn profile-posts scraper Actor (strategy c, first match). Defaults to the `apimaestro/linkedin-profile-posts` Actor (no cookies, ~$5 per 1,000 posts). |
+| `APIFY_LINKEDIN_ACTOR` | Override the Apify Actor ID (Store actors come and go). |
+| `APIFY_LINKEDIN_INPUT` | Optional raw JSON run input for a custom Actor; supports `{username}` / `{profile_url}` placeholders. |
 | `SCRAPECREATORS_API_KEY` | ScrapeCreators LinkedIn profile/posts endpoint (strategy c, second match). |
 | `EXA_API_KEY` | Exa `site:linkedin.com` search for posts/articles (strategy c, last match). |
 
