@@ -126,6 +126,8 @@ class TestSynthesizeReport:
         system = messages[0].content
         human = messages[1].content
         assert "NEVER fabricate" in system
+        assert "ONE row per GitHub repository" in system
+        assert "EVERY LinkedIn post" in system
         assert "Vincent Caldeira, CTO APAC" in human
         assert "caldeirav" in human
         assert "upstream-project/fleet-operator/pull/42" in human

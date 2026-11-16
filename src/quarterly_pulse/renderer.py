@@ -132,7 +132,9 @@ def render_audit_footer(audit: AuditReport) -> str:
         "",
         f"- Generated at: {audit.generated_at.strftime('%Y-%m-%d %H:%M %Z')}",
         f"- Model: {audit.model or 'n/a'}",
-        f"- Activity items: {audit.total_items} gathered / {audit.items_after_dedup} after deduplication",
+        f"- Activity items: {audit.total_items} gathered / {audit.items_after_dedup} after deduplication / "
+        f"{audit.items_for_synthesis} used for synthesis (chunked pre-summarization: "
+        f"{'yes' if audit.chunked else 'no'})",
         "",
         "| Source | Strategy used | Items | Warnings |",
         "| :---- | :---- | ----: | :---- |",

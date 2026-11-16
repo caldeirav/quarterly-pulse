@@ -96,6 +96,8 @@ class AuditReport(BaseModel):
     model: str | None = None
     total_items: int = 0
     items_after_dedup: int = 0
+    items_for_synthesis: int = 0
+    chunked: bool = False
     empty_sections: list[int] = Field(default_factory=list)
     grounding_violations: list[str] = Field(default_factory=list)
     generated_at: datetime.datetime = Field(default_factory=lambda: datetime.datetime.now().astimezone())

@@ -14,7 +14,9 @@ from quarterly_pulse.connectors.linkedin import (
     PORTABILITY_URL,
     SCRAPECREATORS_POSTS_URL,
     EXA_SEARCH_URL,
+    ShareRecord,
     _parse_linkedin_datetime,
+    _records_to_items,
     fetch_linkedin_activity,
     find_linkedin_export,
     linkedin_exclusions,
@@ -375,3 +377,26 @@ class TestDatetimeParsing:
     def test_none_and_garbage(self) -> None:
         assert _parse_linkedin_datetime(None) is None
         assert _parse_linkedin_datetime("not a date") is None
+
+
+class TestUrlCleaning:
+    def test_tracking_params_stripped_from_share_urls(self) -> None:
+        records = [
+            ShareRecord(
+                kind="post",
+                occurred_at="2026-08-12 09:00",
+                text="hello",
+                url=(
+                    "https://www.linkedin.com/posts/caldeirav_x-activity-1"
+                    "?utm_source=social_share_send&utm_medium=member_desktop_web&rcm=ACoAAA"
+                ),
+            )
+        ]
+        items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
+        assert items[0].url == "https://www.linkedin.com/posts/caldeirav_x-activity-1"
+
+    def test_plain_urls_untouched(self) -> None:
+        records = [ShareRecord(kind="post", occurred_at="2026-08-12 09:00", text="x",
+                               url="https://www.linkedin.com/posts/caldeirav_y-activity-2")]
+        items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
+        assert items[0].url == "https://www.linkedin.com/posts/caldeirav_y-activity-2"

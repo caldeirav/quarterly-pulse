@@ -319,6 +319,8 @@ def _build_audit(
         model=model_id,
         total_items=synthesis.items_received,
         items_after_dedup=synthesis.items_after_dedup,
+        items_for_synthesis=synthesis.items_for_synthesis,
+        chunked=synthesis.chunked,
         empty_sections=empty_sections,
         grounding_violations=synthesis.grounding_violations,
     )

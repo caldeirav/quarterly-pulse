@@ -67,6 +67,8 @@ def _audit() -> AuditReport:
         model="openai:gpt-4o",
         total_items=19,
         items_after_dedup=18,
+        items_for_synthesis=17,
+        chunked=False,
         empty_sections=[3, 5, 7, 9],
         grounding_violations=[
             "UpstreamContributionRow.links: removed ungrounded URL https://example.com/fake"
@@ -195,7 +197,8 @@ class TestAuditFooter:
         assert "local_documents" in footer
         assert "LINKEDIN_ACCESS_TOKEN is not set" in footer
         assert "openai:gpt-4o" in footer
-        assert "19 gathered / 18 after deduplication" in footer
+        assert "19 gathered / 18 after deduplication / 17 used for synthesis" in footer
+        assert "chunked pre-summarization: no" in footer
 
     def test_footer_lists_empty_sections_and_violations(self) -> None:
         footer = render_audit_footer(_audit())

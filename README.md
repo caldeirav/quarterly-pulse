@@ -21,9 +21,9 @@ template (.md) ──► parser ──► contributor profile + section schemas 
         ▼                          ▼                          ▼
    GitHub connector          LinkedIn connector         Local docs connector
    (GraphQL + Search,        (Portability API →          (md/txt/pdf/docx/pptx,
-    gh CLI fallback)          export archive →            mtime or in-document
-                              Apify/ScrapeCreators/       dates)
-                              Exa → warn & skip)
+    paginated, aggregated    export archive →            mtime or in-document
+    per repository,          Apify/ScrapeCreators/       dates)
+    gh CLI fallback)         Exa → warn & skip)
         └──────────────────────────┼──────────────────────────┘
                                    ▼
                     LangChain synthesizer (LCEL, structured output,
