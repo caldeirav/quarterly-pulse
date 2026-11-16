@@ -140,6 +140,8 @@ class TestSynthesizeReport:
         system = messages[0].content
         human = messages[1].content
         assert "NEVER fabricate" in system
+        assert "2-3 full sentences" in system
+        assert "never stop at the first sentence" in system
         assert "ONE row per GitHub repository" in system
         assert "EVERY LinkedIn post" in system
         assert "EVERY gathered item must appear somewhere" in system

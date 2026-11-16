@@ -47,7 +47,7 @@ STRICT GROUNDING RULES:
 - Use ONLY facts, customer names, metrics, numbers, dates, and URLs that appear in the provided activity records.
 - NEVER fabricate or guess customer names, metrics, or URLs. If no link exists in the records, leave the links cell empty.
 - Prefer concrete outcomes, counts, and statuses found in the records over generic phrasing.
-- Keep each cell concise: at most about 40 words of plain text, no Markdown formatting inside cells.
+- Keep row-title and links cells concise. Write the activity/outcome (middle) column as 2-3 full sentences: what was done, the concrete outcome, audience, or adoption, and why it matters. A single short sentence is too thin — never stop at the first sentence. No Markdown formatting inside cells.
 - Set section_6_title only when section 6 rows exist, deriving a short title from their content (e.g. "Research & Internal Tooling").
 
 COMPLETENESS RULES:
@@ -58,7 +58,7 @@ COMPLETENESS RULES:
 
 ROW CONTENT RULES:
 - GitHub repository rows: lead with what the repository is and does (use its description from the record) and what the contributor actually did there; keep pull request/issue/commit counts as supporting detail only, never as the main content.
-- LinkedIn posts: use the post's own headline or opening line as the row title (never prefix it with "LinkedIn"), and write a 2-3 sentence summary drawn from the post's own content. When the post coincides with presenting at, moderating, or attending an event, name the event and the talk. Do not mention reaction, comment, or follower counts.
+- LinkedIn posts: use the post's own headline or opening sentence as the row title (never prefix it with "LinkedIn"), and write a 2-3 sentence summary drawn from the post's own content. When the post coincides with presenting at, moderating, or attending an event, name the event and the talk. Do not mention reaction, comment, or follower counts.
 - Event series (for example Summit Connect across cities, or several EBC briefings): create ONE row PER event or location. Never merge multiple events or locations into a single row.
 - Row titles must be concise, descriptive names for the activity — never a sentence quoted from the source text.
 - Local documents and email exports: classify each into its best-fitting section — Section 3 (repeatable solution templates & reusable assets), Section 4 (customer-specific opportunities & field work, including customer summit and briefing readouts), Section 5 (industry and community engagements, including AI Center of Excellence programs), or Section 6 (custom workstream). Correlate email threads with the event they concern (EBC briefings, Summit Connect and other field events) instead of listing each email as a separate entry. Use the document's own title as the row title and summarize its actual content in 1-3 sentences.
