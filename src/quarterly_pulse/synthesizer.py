@@ -53,6 +53,7 @@ STRICT GROUNDING RULES:
 COMPLETENESS RULES:
 - GitHub records arrive pre-aggregated per repository: render exactly ONE row per GitHub repository item, citing the repository URL and the most notable PR/issue links from its raw_context.
 - Include EVERY LinkedIn post and EVERY local document record as its own row in the appropriate section; merge only exact duplicates of the same underlying item. NEVER drop or consolidate records merely because there are many of them.
+- LinkedIn posts that share attached content — slides, decks, articles, documents, or any linked resource (tagged "post with attached content") — MUST each appear as their own row. Never merge them into an event row and never treat them as covered by other rows about the same event: distinct posts are distinct rows. The only question is placement — event-associated posts go to Sections 4/5, and other content posts go to the section matching their content (for example shared reference architectures and reusable assets in Section 3, industry commentary in Section 5).
 - When merging duplicates that describe the same underlying work, keep the richest description and all distinct links.
 - EVERY gathered item must appear somewhere in the report, even when no section fits perfectly: choose the closest plausible section, and use Section 6 (Custom Workstream) as the catch-all for overflow work. An item placed in the wrong section is far better than a missing item — the contributor re-places entries manually.
 
@@ -118,7 +119,7 @@ RETRY_PROMPT = ChatPromptTemplate.from_messages(
             "human",
             """A quarterly report draft may have accidentally left out the activity records below.
 
-First compare each left-out record against the existing draft: when a record's content is already adequately represented by an existing row — even under different wording or without a link — do NOT create a new row for it. Create rows only for genuinely missing content, placed in the correct section following every rule above, with contributor-POV titles and external assessments.
+Compare each left-out record against the existing draft: a record counts as already covered ONLY when an existing row cites the same link or is literally the same item (same post URL, same document, same repository). A record that is merely about the same event or topic as an existing row is NOT covered — every distinct post, especially posts with attached slides, articles, or linked content, must still become its own row. Create rows for everything not covered, placed in the correct section following every rule above, with contributor-POV titles and external assessments.
 
 Contributor profile:
 - Name & Role: {name_role}

@@ -208,6 +208,41 @@ class TestThirdPartyStrategies:
         assert captured["actor"] == "custom/actor"
         assert captured["input"] == {"username": "caldeirav", "total_posts": 50}
 
+    async def test_apify_attachments_captured(
+        self, make_settings, monkeypatch, tmp_path: Path
+    ) -> None:
+        def fake_actor(token: str, actor_id: str, run_input: dict) -> list[dict]:
+            return [
+                {
+                    "urn": "7123456789012345678",
+                    "posted_at": {"date": "2026-08-30 10:00:20"},
+                    "text": "Sharing the deck and write-up from my talk.",
+                    "url": "https://www.linkedin.com/posts/caldeirav_talk-1",
+                    "article": {
+                        "title": "Reliable AI evaluation",
+                        "url": "https://www.linkedin.com/pulse/reliable-ai-evaluation",
+                    },
+                    "document": {
+                        "title": "Talk deck",
+                        "url": "https://media.licdn.com/dms/document/deck.pdf",
+                    },
+                }
+            ]
+
+        monkeypatch.setattr(linkedin_module, "_run_apify_actor", fake_actor)
+
+        result = await fetch_linkedin_activity(
+            PROFILE_URL, CONTRIBUTOR_NAME, START_DATE, END_DATE,
+            tmp_path, make_settings(apify_api_token="apify-token"),
+        )
+
+        assert result.strategy == "apify_actor"
+        raw_context = result.items[0].raw_context
+        assert "post with attached content" in raw_context
+        assert "attached article: Reliable AI evaluation" in raw_context
+        assert "https://www.linkedin.com/pulse/reliable-ai-evaluation" in raw_context
+        assert "attached document: Talk deck" in raw_context
+
     async def test_apify_failure_degrades_gracefully(
         self, make_settings, monkeypatch, tmp_path: Path
     ) -> None:

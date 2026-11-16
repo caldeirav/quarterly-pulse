@@ -34,7 +34,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from quarterly_pulse.config import Settings
 from quarterly_pulse.models import ActivityItem, ConnectorResult
@@ -76,6 +76,7 @@ class ShareRecord(BaseModel):
     text: str = ""
     url: str | None = None
     visibility: str | None = None
+    attachments: str = Field(default="", description="Attached article/document/media links.")
 
 
 async def fetch_linkedin_activity(
@@ -433,6 +434,7 @@ async def _fetch_via_apify(settings: Settings, profile_url: str) -> list[ShareRe
                 occurred_at=_apify_post_date(post),
                 text=_first_key(post, "text", "commentary", "content") or "",
                 url=_first_key(post, "url", "postUrl", "post_url"),
+                attachments=_apify_attachments(post),
             )
         )
     return records
@@ -586,11 +588,43 @@ def _records_to_items(records: list[ShareRecord], start_date: date, end_date: da
                 summary=_clip(record.text, _TEXT_CLIP),
                 impact="",
                 url=_clean_share_url(record.url),
-                raw_context=f"linkedin {record.kind}: {label}"
-                + ("; event-related post" if _EVENT_HINT_RE.search(record.text) else ""),
+                raw_context=_linkedin_raw_context(record, label),
             )
         )
     return items
+
+
+def _linkedin_raw_context(record: ShareRecord, label: str) -> str:
+    """Raw context with event/attachment tags that steer synthesis routing."""
+    context = f"linkedin {record.kind}: {label}"
+    if _EVENT_HINT_RE.search(record.text):
+        context += "; event-related post"
+    if record.attachments:
+        context += "; post with attached content; " + record.attachments
+    return context
+
+
+def _apify_attachments(post: dict[str, Any]) -> str:
+    """Attached article/document/media links from an Apify post record.
+
+    Posts sharing slides, articles, or other linked content are substantive
+    report entries on their own; the links are also grounding candidates for
+    the report's Links column.
+    """
+    parts: list[str] = []
+    article = post.get("article")
+    if isinstance(article, dict) and article.get("url"):
+        parts.append(f"attached article: {article.get('title') or 'article'} ({article['url']})")
+    document = post.get("document")
+    if isinstance(document, dict) and document.get("url"):
+        parts.append(f"attached document: {document.get('title') or 'document'} ({document['url']})")
+    media = post.get("media")
+    if isinstance(media, dict) and media.get("url"):
+        parts.append(f"attached media ({media.get('type', 'media')}): {media['url']}")
+    reshared = post.get("reshared_post")
+    if isinstance(reshared, dict) and reshared.get("url"):
+        parts.append(f"reshared post: {reshared.get('text', '')} ({reshared['url']})")
+    return "; ".join(parts)
 
 
 def _first_sentence(text: str) -> str:
