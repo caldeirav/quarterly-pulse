@@ -54,7 +54,8 @@ EXA_SEARCH_URL = "https://api.exa.ai/search"
 _EXPORT_DIR_HINTS = ("linkedin",)
 _EXPORT_MARKER_FILES = ("Shares.csv", "Positions.csv", "Connections.csv")
 _TEXT_CLIP = 900
-_TITLE_CLIP = 90
+#: Max length for a post's extracted title sentence.
+_TITLE_CLIP = 140
 
 
 class ShareRecord(BaseModel):
@@ -567,7 +568,7 @@ def _records_to_items(records: list[ShareRecord], start_date: date, end_date: da
         # Keep the post's own headline as the title (no "LinkedIn" prefix);
         # the longer summary gives the synthesizer enough text to describe the
         # post and connect it to any event presentation it coincides with.
-        label = record.title or _clip(record.text, _TITLE_CLIP) or "LinkedIn activity"
+        label = record.title or _first_sentence(record.text) or "LinkedIn activity"
         items.append(
             ActivityItem(
                 source="linkedin",
@@ -580,6 +581,22 @@ def _records_to_items(records: list[ShareRecord], start_date: date, end_date: da
             )
         )
     return items
+
+
+def _first_sentence(text: str) -> str:
+    """The post's first complete sentence — a proper row title, never a hard clip.
+
+    Character-clipped titles read as cut off mid-thought in the report; a
+    full sentence (capped at ``_TITLE_CLIP``) always ends naturally.
+    """
+    cleaned = " ".join(text.split())
+    if not cleaned:
+        return ""
+    match = re.search(r"[^.!?]*[.!?]", cleaned)
+    sentence = match.group(0).strip() if match else cleaned
+    if len(sentence) > _TITLE_CLIP:
+        return sentence[: _TITLE_CLIP - 1].rsplit(" ", 1)[0] + "…"
+    return sentence
 
 
 def _clean_share_url(url: str | None) -> str | None:

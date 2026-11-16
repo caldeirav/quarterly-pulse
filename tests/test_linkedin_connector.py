@@ -417,6 +417,26 @@ class TestItemShape:
         assert not items[0].title.startswith("LinkedIn")
         assert "linkedin post" in items[0].raw_context  # kind kept for traceability
 
+    def test_title_is_first_complete_sentence_not_a_hard_clip(self) -> None:
+        text = (
+            "Presented at Agent Substrate Day on instant circuit breakers achieving sub-15ms "
+            "verification. The deck and benchmark results are now available for the team. "
+            "Thanks to everyone who came to the session and asked such sharp questions."
+        )
+        records = [ShareRecord(kind="post", occurred_at="2026-08-30 10:00", text=text)]
+        items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
+        assert items[0].title == (
+            "Presented at Agent Substrate Day on instant circuit breakers achieving sub-15ms verification."
+        )
+        assert not items[0].title.endswith("…")  # never a mid-word character clip
+
+    def test_title_sentence_capped_gracefully_when_very_long(self) -> None:
+        text = "This single sentence goes on and on and on " * 10  # no punctuation at all
+        records = [ShareRecord(kind="post", occurred_at="2026-08-30 10:00", text=text)]
+        items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
+        assert len(items[0].title) <= 140
+        assert items[0].title.endswith("…")  # capped on a word boundary
+
     def test_summary_keeps_enough_text_for_multi_sentence_descriptions(self) -> None:
         long_text = " ".join(f"Sentence number {i} about the event." for i in range(60))
         assert len(long_text) > 900
