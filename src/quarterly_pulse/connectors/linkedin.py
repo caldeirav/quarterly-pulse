@@ -53,7 +53,7 @@ EXA_SEARCH_URL = "https://api.exa.ai/search"
 
 _EXPORT_DIR_HINTS = ("linkedin",)
 _EXPORT_MARKER_FILES = ("Shares.csv", "Positions.csv", "Connections.csv")
-_TEXT_CLIP = 280
+_TEXT_CLIP = 900
 _TITLE_CLIP = 90
 
 
@@ -579,12 +579,15 @@ def _records_to_items(records: list[ShareRecord], start_date: date, end_date: da
         occurred = _parse_linkedin_datetime(record.occurred_at)
         if occurred is not None and not (start_date <= occurred <= end_date):
             continue
+        # Keep the post's own headline as the title (no "LinkedIn" prefix);
+        # the longer summary gives the synthesizer enough text to describe the
+        # post and connect it to any event presentation it coincides with.
         label = record.title or _clip(record.text, _TITLE_CLIP) or "LinkedIn activity"
         items.append(
             ActivityItem(
                 source="linkedin",
                 date=occurred,
-                title=f"LinkedIn {record.kind}: {label}",
+                title=label,
                 summary=_clip(record.text, _TEXT_CLIP),
                 impact=record.stats
                 or (f"visibility: {record.visibility}" if record.visibility else ""),

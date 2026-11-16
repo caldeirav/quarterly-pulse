@@ -33,7 +33,7 @@ INTERESTING_URL_PREFIXES = (
     "https://github.com/",
     "https://raw.githubusercontent.com/",
 )
-_SUMMARY_CLIP = 600
+_SUMMARY_CLIP = 1000
 _MAX_URLS_CAPTURED = 5
 
 

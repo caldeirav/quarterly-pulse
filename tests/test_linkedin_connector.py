@@ -400,3 +400,26 @@ class TestUrlCleaning:
                                url="https://www.linkedin.com/posts/caldeirav_y-activity-2")]
         items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
         assert items[0].url == "https://www.linkedin.com/posts/caldeirav_y-activity-2"
+
+
+class TestItemShape:
+    def test_title_is_the_posts_own_headline_without_prefix(self) -> None:
+        records = [
+            ShareRecord(
+                kind="post",
+                occurred_at="2026-08-30 10:00",
+                text="Agent Substrate Day talk recap and deck",
+                url="https://www.linkedin.com/posts/caldeirav_recap-1",
+            )
+        ]
+        items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
+        assert items[0].title == "Agent Substrate Day talk recap and deck"
+        assert not items[0].title.startswith("LinkedIn")
+        assert "linkedin post" in items[0].raw_context  # kind kept for traceability
+
+    def test_summary_keeps_enough_text_for_multi_sentence_descriptions(self) -> None:
+        long_text = " ".join(f"Sentence number {i} about the event." for i in range(60))
+        assert len(long_text) > 900
+        records = [ShareRecord(kind="post", occurred_at="2026-08-30 10:00", text=long_text)]
+        items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
+        assert 850 <= len(items[0].summary) <= 910  # clipped near the 900-char budget
