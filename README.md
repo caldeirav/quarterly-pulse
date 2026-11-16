@@ -72,6 +72,35 @@ uv run quarterly-pulse \
 | `--linkedin` | no | Override the LinkedIn profile URL/handle parsed from the template. |
 | `--model` | no | LangChain model override (e.g. `openai:gpt-4o`, `anthropic:claude-sonnet-4-5`); defaults to `LLM_MODEL`. |
 | `--output` | no | Output `.md` path; defaults to `<template_name>_populated.md` in the current directory. |
+| `--cache` | no | JSON file caching everything the connectors extracted. When it exists, connectors are skipped and only the report is regenerated. |
+| `--refresh` | no | With `--cache`: re-gather from all sources, overwriting the cache. |
+
+## Caching: regenerate output without re-scraping
+
+Gathering from GitHub, LinkedIn (Apify), and your docs directory is the slow,
+costly part; iterating on output rules is not. Use `--cache` to keep what was
+extracted and regenerate only the report:
+
+```bash
+# First run: gathers all sources, writes the cache, generates the report.
+uv run quarterly-pulse --template templates/quarterly-template.md \
+  --docs-dir ./docs --start-date 2026-07-01 --cache qp-cache.json
+
+# Later runs: connectors are skipped entirely; only synthesis + rendering run
+# (seconds, no Apify credit, no GitHub API calls).
+uv run quarterly-pulse --template templates/quarterly-template.md \
+  --docs-dir ./docs --start-date 2026-07-01 --cache qp-cache.json
+
+# When your sources actually changed: re-gather and overwrite the cache.
+uv run quarterly-pulse --template templates/quarterly-template.md \
+  --docs-dir ./docs --start-date 2026-07-01 --cache qp-cache.json --refresh
+```
+
+The cache stores every gathered `ActivityItem`, the strategy and warnings per
+source, the reporting window, and the contributor profile, so the audit footer
+stays accurate for cached runs (it notes the gather timestamp). If the
+requested window or handles differ from the cached gather, the CLI warns and
+suggests `--refresh`.
 
 ## Configuration
 

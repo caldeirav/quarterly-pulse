@@ -154,6 +154,13 @@ def render_audit_footer(audit: AuditReport) -> str:
         lines.append("")
         lines.append(f"- Report rows per section: {joined}")
 
+    if audit.cache_gathered_at is not None:
+        lines.append("")
+        lines.append(
+            f"- Sources loaded from cache gathered at "
+            f"{audit.cache_gathered_at.strftime('%Y-%m-%d %H:%M %Z')} (connectors skipped)."
+        )
+
     if audit.backfilled_count:
         lines.append("")
         lines.append(

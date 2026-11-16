@@ -80,6 +80,18 @@ class ParsedTemplate(BaseModel):
         return None
 
 
+class GatherCache(BaseModel):
+    """Gathered activity cached between runs so output can be regenerated
+    without re-scraping GitHub, LinkedIn, or the local docs directory."""
+
+    version: int = 1
+    gathered_at: datetime.datetime
+    start_date: datetime.date
+    end_date: datetime.date
+    profile: TemplateProfile
+    connector_results: list[ConnectorResult] = Field(default_factory=list)
+
+
 class SourceAudit(BaseModel):
     """Per-source audit entry for the output footer."""
 
@@ -102,4 +114,5 @@ class AuditReport(BaseModel):
     section_row_counts: dict[int, int] = Field(default_factory=dict)
     empty_sections: list[int] = Field(default_factory=list)
     grounding_violations: list[str] = Field(default_factory=list)
+    cache_gathered_at: datetime.datetime | None = None
     generated_at: datetime.datetime = Field(default_factory=lambda: datetime.datetime.now().astimezone())

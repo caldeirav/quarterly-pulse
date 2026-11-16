@@ -22,7 +22,7 @@ import logging
 import os
 import sys
 from collections.abc import Coroutine
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
@@ -41,6 +41,7 @@ from quarterly_pulse.connectors.linkedin import (
 from quarterly_pulse.models import (
     AuditReport,
     ConnectorResult,
+    GatherCache,
     SourceAudit,
     TemplateProfile,
 )
@@ -133,6 +134,26 @@ OutputOption = Annotated[
     ),
 ]
 
+CacheOption = Annotated[
+    Optional[Path],
+    typer.Option(
+        "--cache",
+        help=(
+            "Cache gathered activity to this JSON file. When the file exists, connectors "
+            "are skipped and only the output is regenerated — ideal for iterating on "
+            "output rules without re-scraping GitHub/LinkedIn/docs."
+        ),
+    ),
+]
+
+RefreshOption = Annotated[
+    bool,
+    typer.Option(
+        "--refresh",
+        help="With --cache: re-gather from all sources, overwriting the cache file.",
+    ),
+]
+
 
 @app.command()
 def populate(
@@ -144,6 +165,8 @@ def populate(
     linkedin: LinkedinOption = None,
     model: ModelOption = None,
     output: OutputOption = None,
+    cache: CacheOption = None,
+    refresh: RefreshOption = False,
 ) -> None:
     """Populate a quarterly activity log template with gathered activity data."""
     _configure_logging()
@@ -166,9 +189,23 @@ def populate(
 
     chat_model = _init_model(model_id, settings)
 
-    connector_results = asyncio.run(
-        _gather_activity(profile, docs_dir, start_date, resolved_end, settings)
-    )
+    cache_loaded: GatherCache | None = None
+    if cache is not None and cache.exists() and not refresh:
+        cache_loaded = _load_gather_cache(cache, start_date, resolved_end, profile)
+        connector_results = cache_loaded.connector_results
+    else:
+        if refresh and cache is None:
+            typer.secho(
+                "--refresh has no effect without --cache.",
+                err=True,
+                fg=typer.colors.YELLOW,
+            )
+        connector_results = asyncio.run(
+            _gather_activity(profile, docs_dir, start_date, resolved_end, settings)
+        )
+        if cache is not None:
+            _write_gather_cache(cache, start_date, resolved_end, profile, connector_results)
+
     items = [item for result in connector_results for item in result.items]
     _report_connectors(connector_results)
 
@@ -183,7 +220,7 @@ def populate(
         )
         raise typer.Exit(code=1)
 
-    audit = _build_audit(connector_results, synthesis, model_id)
+    audit = _build_audit(connector_results, synthesis, model_id, cache_gathered_at=cache_loaded.gathered_at if cache_loaded else None)
     rendered = render_report(parsed, synthesis.report, audit)
     output_path.write_text(rendered, encoding="utf-8")
 
@@ -300,6 +337,7 @@ def _build_audit(
     connector_results: list[ConnectorResult],
     synthesis: SynthesisResult,
     model_id: str,
+    cache_gathered_at: datetime | None = None,
 ) -> AuditReport:
     """Assemble the audit footer data."""
     report = synthesis.report
@@ -328,7 +366,66 @@ def _build_audit(
         section_row_counts=section_row_counts,
         empty_sections=empty_sections,
         grounding_violations=synthesis.grounding_violations,
+        cache_gathered_at=cache_gathered_at,
     )
+
+
+def _load_gather_cache(
+    path: Path, start_date: date, end_date: date, profile: TemplateProfile
+) -> GatherCache:
+    """Load a gather cache, warning about window or profile mismatches."""
+    try:
+        data = GatherCache.model_validate_json(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        typer.secho(
+            f"Cache file {path} is unreadable ({exc}); re-gather with --refresh or delete it.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    if (data.start_date, data.end_date) != (start_date, end_date):
+        typer.secho(
+            f"[cache] warning: cache was gathered for {data.start_date}..{data.end_date} but this run "
+            f"asked for {start_date}..{end_date}; using the cached window (use --refresh to re-gather).",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
+    if (data.profile.github_handle, data.profile.linkedin_url) != (
+        profile.github_handle,
+        profile.linkedin_url,
+    ):
+        typer.secho(
+            "[cache] warning: contributor handles differ from the cached gather "
+            "(use --refresh to re-gather).",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
+    items = sum(len(result.items) for result in data.connector_results)
+    typer.secho(
+        f"[cache] loaded {items} items gathered at {data.gathered_at:%Y-%m-%d %H:%M}; "
+        "skipping GitHub/LinkedIn/docs connectors.",
+        err=True,
+    )
+    return data
+
+
+def _write_gather_cache(
+    path: Path,
+    start_date: date,
+    end_date: date,
+    profile: TemplateProfile,
+    connector_results: list[ConnectorResult],
+) -> None:
+    """Persist gathered items so the output can be regenerated without re-scraping."""
+    data = GatherCache(
+        gathered_at=datetime.now().astimezone(),
+        start_date=start_date,
+        end_date=end_date,
+        profile=profile,
+        connector_results=connector_results,
+    )
+    path.write_text(data.model_dump_json(indent=2), encoding="utf-8")
+    typer.secho(f"[cache] wrote {path}", err=True)
 
 
 def _report_profile(profile: TemplateProfile) -> None:
