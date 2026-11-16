@@ -54,17 +54,19 @@ COMPLETENESS RULES:
 - GitHub records arrive pre-aggregated per repository: render exactly ONE row per GitHub repository item, citing the repository URL and the most notable PR/issue links from its raw_context.
 - Include EVERY LinkedIn post and EVERY local document record as its own row in the appropriate section; merge only exact duplicates of the same underlying item. NEVER drop or consolidate records merely because there are many of them.
 - When merging duplicates that describe the same underlying work, keep the richest description and all distinct links.
+- EVERY gathered item must appear somewhere in the report, even when no section fits perfectly: choose the closest plausible section, and use Section 6 (Custom Workstream) as the catch-all for overflow work. An item placed in the wrong section is far better than a missing item — the contributor re-places entries manually.
 
 ROW CONTENT RULES:
-- LinkedIn posts: use the post's own headline or opening line as the row title (never prefix it with "LinkedIn"). Write a 2-3 sentence summary that explains what the post is about AND, when the post coincides with presenting at, moderating, or attending an event, name the event and the talk. Include reaction/comment counts when available.
-- Local documents: classify each document into Section 3 (repeatable solution templates & reusable assets), Section 4 (customer-specific opportunities & field work), or Section 6 (custom workstream) unless it clearly belongs elsewhere. Use the document's own title as the row title and summarize its actual content in 1-3 sentences.
+- LinkedIn posts: use the post's own headline or opening line as the row title (never prefix it with "LinkedIn"). Write a 2-3 sentence summary that explains what the post is about AND, when the post coincides with presenting at, moderating, or attending an event, name the event and the talk. Include reaction/comment counts when available. Posts about customer-specific engagements (customer summits such as Summit Connect, executive briefings, POCs) belong in Section 4; posts about industry events, conferences, and community programs belong in Section 5.
+- Local documents: classify each document into its best-fitting section — Section 3 (repeatable solution templates & reusable assets), Section 4 (customer-specific opportunities & field work, including customer summit and briefing readouts), Section 5 (industry and community engagements, including AI Center of Excellence programs), or Section 6 (custom workstream). Use the document's own title as the row title and summarize its actual content in 1-3 sentences.
 - Section 8 (Looking Ahead) and Section 9 (Help Needed & Team Radar): PROPOSE concrete recommendations derived from the records — work with momentum to continue or ship next quarter, customer engagements to follow up, emerging opportunities, activities to stop or deprioritize, and plausible escalations or decisions where leadership help is needed. These are suggestions the contributor will edit manually; never invent URLs, owners, dates, or metrics that are not in the records.
+- Copy URLs character-for-character from the records; never shorten, paraphrase, or reconstruct them.
 
 SECTION MAPPING GUIDE:
 - Section 2, Open Source & Upstream Contributions: upstream PRs, commits, issues/RFCs, maintainership, community leadership.
 - Section 3, Repeatable Solution Templates & Reusable Assets: reference architectures, demo repos, automation scripts, playbooks, workshops, internal tools built for reuse.
-- Section 4, Customer-Specific Opportunities & Field Work: customer POCs, architecture sprints, RFP/tender support, design partner trials.
-- Section 5, Executive, Partner & Industry Engagements: talks, webinars, LinkedIn posts/articles, EBC briefings, partner co-builds, product RFEs.
+- Section 4, Customer-Specific Opportunities & Field Work: customer POCs, architecture sprints, RFP/tender support, design partner trials, and customer-facing events such as summit series (e.g., Summit Connect) and executive briefings.
+- Section 5, Executive, Partner & Industry Engagements: talks, webinars, LinkedIn posts/articles, EBC briefings, partner co-builds, product RFEs, and industry/community programs such as AI Center of Excellence (AI CoE) initiatives.
 - Section 6, Custom Workstream: meaningful overflow work such as research spikes, internal tooling, standards bodies, mentoring.
 - Section 7, Challenges, Friction & Mitigations: blockers, slipped timelines, or dependency issues evidenced in the records.
 - Section 8, Looking Ahead: recommended next-quarter commitments and suggestions (Must-Win Priority / Emerging Opportunity / Stop / Deprioritize).
@@ -240,6 +242,10 @@ class SynthesisResult(BaseModel):
     items_after_dedup: int = 0
     items_for_synthesis: int = 0
     chunked: bool = False
+    backfilled_count: int = Field(
+        default=0,
+        description="Items the model left out that were auto-added to Section 6 by the completeness backstop.",
+    )
     grounding_violations: list[str] = Field(default_factory=list)
 
 
@@ -291,6 +297,7 @@ async def synthesize_report(
         report = await final_chain.ainvoke(_prompt_vars(profile, records))
 
     report = _drop_empty_rows(report)
+    backfilled = _backfill_unrepresented(report, deduped)
     violations = _validate_and_sanitize_grounding(report, _allowed_urls(deduped))
     return SynthesisResult(
         report=report,
@@ -298,22 +305,32 @@ async def synthesize_report(
         items_after_dedup=len(deduped),
         items_for_synthesis=len(records),
         chunked=chunked,
+        backfilled_count=backfilled,
         grounding_violations=violations,
     )
 
 
 def deduplicate_items(items: list[ActivityItem]) -> list[ActivityItem]:
-    """Deterministic dedup: same-source items sharing a URL, or title+date, collapse."""
+    """Deterministic dedup.
+
+    Items carrying a URL dedupe strictly by ``(source, URL)`` — two posts with
+    different URLs must never collapse, even when their titles and dates match
+    (event-series posts often share an opening line). URL-less items fall back
+    to ``(source, normalized title, date, raw_context)``.
+    """
     seen: set[tuple[str, str]] = set()
     unique: list[ActivityItem] = []
     for item in items:
-        keys: list[tuple[str, str]] = []
         if item.url:
-            keys.append(("url", f"{item.source}:{item.url}"))
-        keys.append(("title", f"{item.source}:{_normalize_title(item.title)}:{item.date}"))
-        if any(key in seen for key in keys):
+            key = ("url", f"{item.source}:{item.url}")
+        else:
+            key = (
+                "title",
+                f"{item.source}:{_normalize_title(item.title)}:{item.date}:{item.raw_context}",
+            )
+        if key in seen:
             continue
-        seen.update(keys)
+        seen.add(key)
         unique.append(item)
     return unique
 
@@ -381,6 +398,14 @@ def _prompt_vars(
 _CELL_URL_RE = re.compile(r"https?://[^\s)|]+")
 _DOC_PATH_RE = re.compile(r"document: ([^;]+)")
 _RAW_URL_RE = re.compile(r"https?://[^\s;,|]+")
+_REPO_FRAGMENT_RE = re.compile(r"\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\b")
+#: URLs must share at least this many characters before prefix-matching counts
+#: as grounded; short prefixes would match unrelated links on the same host.
+_MIN_GROUNDED_URL_PREFIX = 40
+_REPO_FRAGMENT_RE = re.compile(r"\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\b")
+#: URLs must share at least this many characters before prefix-matching counts
+#: as grounded; short prefixes would match unrelated links on the same host.
+_MIN_GROUNDED_URL_PREFIX = 40
 
 
 def _allowed_urls(items: Iterable[ActivityItem]) -> set[str]:
@@ -426,7 +451,7 @@ def _sanitize_cell(cell: str, allowed: set[str]) -> tuple[str, list[str]]:
 
     def _replace(match: re.Match[str]) -> str:
         url = match.group(0)
-        if url in allowed or url.rstrip(".,;:") in allowed:
+        if _is_grounded(url, allowed):
             return url
         removed.append(url)
         return ""
@@ -437,12 +462,108 @@ def _sanitize_cell(cell: str, allowed: set[str]) -> tuple[str, list[str]]:
     return " ".join(sanitized.split()), removed
 
 
+def _is_grounded(url: str, allowed: set[str]) -> bool:
+    """Grounded when exact, or when one side is a long-enough prefix of the other.
+
+    Models occasionally truncate very long URLs (LinkedIn activity links run
+    ~100 characters) when citing them; a truncated real link shares its prefix
+    with an allowed URL, while fabricated links diverge early.
+    """
+    candidate = url.rstrip(".,;:")
+    if candidate in allowed or url in allowed:
+        return True
+    if len(candidate) < _MIN_GROUNDED_URL_PREFIX:
+        return False
+    return any(
+        len(allowed_url) >= _MIN_GROUNDED_URL_PREFIX
+        and (candidate.startswith(allowed_url) or allowed_url.startswith(candidate))
+        for allowed_url in allowed
+    )
+
+
 def _iter_row_fields(report: QuarterReport) -> Iterator[tuple[BaseModel, str]]:
     """Yield every ``(row, field_name)`` pair across all report sections."""
     for section in _ROW_SECTIONS:
         for row in getattr(report, section):
             for field_name in type(row).model_fields:
                 yield row, field_name
+
+
+# ---------------------------------------------------------------------------
+# Completeness backstop: every gathered item must land somewhere in the report
+# ---------------------------------------------------------------------------
+
+
+def _backfill_unrepresented(report: QuarterReport, items: list[ActivityItem]) -> int:
+    """Append items the model left out to Section 6; return how many were added.
+
+    The contributor prefers misplaced-but-present rows over missing
+    information, so anything unrepresented is auto-added to the Custom
+    Workstream catch-all, marked for manual re-placement.
+    """
+    missing = _find_unrepresented_items(report, items)
+    if not missing:
+        return 0
+    for item in missing:
+        doc = _DOC_PATH_RE.search(item.raw_context or "")
+        links = item.url or (doc.group(1).strip() if doc else "")
+        outcome = _clip(" ".join(part for part in (item.summary, item.impact) if part), 400)
+        report.section_6_custom.append(
+            CustomWorkstreamRow(
+                initiative_activity_name=item.title,
+                what_you_did_outcome=f"{outcome} (auto-added; verify section)".strip(),
+                links=links,
+            )
+        )
+    if not report.section_6_title:
+        report.section_6_title = "Additional Gathered Activity"
+    return len(missing)
+
+
+def _find_unrepresented_items(
+    report: QuarterReport, items: list[ActivityItem]
+) -> list[ActivityItem]:
+    """Items whose identifying markers (URLs, doc paths, repo, title) appear nowhere in the report."""
+    cell_text = _report_cell_text(report)
+    lowered = cell_text.lower()
+    cell_urls = [match.group(0) for match in _CELL_URL_RE.finditer(cell_text)]
+
+    missing: list[ActivityItem] = []
+    for item in items:
+        if not any(
+            _marker_present(marker, lowered, cell_urls) for marker in _item_markers(item)
+        ):
+            missing.append(item)
+    return missing
+
+
+def _item_markers(item: ActivityItem) -> list[str]:
+    """Lowercase strings that identify an item inside generated report cells."""
+    markers: list[str] = [item.url or ""]
+    markers.extend(match.group(0) for match in _RAW_URL_RE.finditer(item.raw_context or ""))
+    doc = _DOC_PATH_RE.search(item.raw_context or "")
+    if doc:
+        markers.append(doc.group(1).strip())
+    if item.source == "github":
+        fragment = _REPO_FRAGMENT_RE.search(item.title)
+        if fragment:
+            markers.append(fragment.group(1))
+    markers.append(item.title)
+    return [marker.lower() for marker in markers if marker]
+
+
+def _marker_present(marker: str, lowered_cell_text: str, cell_urls: list[str]) -> bool:
+    """A marker matches when found verbatim (non-URL) or prefix-tolerantly (URL)."""
+    if marker.startswith("http"):
+        return any(_is_grounded(cell_url, {marker}) for cell_url in cell_urls)
+    return marker in lowered_cell_text
+
+
+def _report_cell_text(report: QuarterReport) -> str:
+    """All generated cell values joined for completeness matching."""
+    return "\n".join(
+        str(getattr(row, field_name) or "") for row, field_name in _iter_row_fields(report)
+    )
 
 
 def _drop_empty_rows(report: QuarterReport) -> QuarterReport:

@@ -21,22 +21,21 @@
 
 | Project / Repo / Contribution | What You Did & Why It Matters *(Deliverable, milestone, adoption)* | Links *(Repos, PRs, issues, release notes)* |
 | :---- | :---- | :---- |
-| Green-Software-Foundation/gaic | Filed issue on Sustainable AI reference architecture for cloud-native environments. | https://github.com/Green-Software-Foundation/gaic/issues/10 |
-| InnerSourceCommons/InnerSourcePatterns | Drafted pattern for Internal Developer Platform. | https://github.com/InnerSourceCommons/InnerSourcePatterns/pull/720 |
-| ScottLogic/fluxnova-eval-demo | Enhanced macOS support and initiated UI update process. | https://github.com/ScottLogic/fluxnova-eval-demo/pull/31 |
-| aaif/ambassadors | Submitted issues including Instant Circuit Breakers and Shenzhen Keynote. | https://github.com/aaif/ambassadors/issues/1690 |
-| caldeirav/agentic-graphrag-finance | Refined datasets and introduced live SEC ingestion feature. | https://github.com/caldeirav/agentic-graphrag-finance/pull/10 |
-| caldeirav/finagent-mesh-mcp | Implemented yield recovery and issue resolutions. | https://github.com/caldeirav/finagent-mesh-mcp/pull/15 |
-| caldeirav/mcp-2026-07-28-schema-reliability-demo | Demonstrated strict versus legacy MCP contracts in banking fund-transfer. | https://github.com/caldeirav/mcp-2026-07-28-schema-reliability-demo/pull/1 |
-| caldeirav/mcp-mrtr-devops-demo | Launched agentgateway LLM playground and demonstrated MRTR migration. | https://github.com/caldeirav/mcp-mrtr-devops-demo/pull/2 |
-| caldeirav/mlflow-edd-financial-agent | Developed EDD financial assistant with MemAlign loops. | https://github.com/caldeirav/mlflow-edd-financial-agent/pull/1 |
-| caldeirav/sub15-breaker | Prepared infrastructure and UI for live demo launcher. | https://github.com/caldeirav/sub15-breaker/pull/79 |
-| cncf/toc | Added agentic systems stream to toolkit docs. | https://github.com/cncf/toc/pull/2368 |
-| finos-labs/ai-evals-framework | Expanded README and created use-case templates. | https://github.com/finos-labs/ai-evals-framework/pull/27 |
-| finos-labs/finsight-agent | Implemented audio processing and improved volatility models. | https://github.com/finos-labs/finsight-agent/issues/4 |
-| finos/community | Proposed new AI Evaluation Framework. | https://github.com/finos/community/issues/438 |
-| ilya-kolchinsky/ToolScope | Enhanced model evaluations and tooling updates. | https://github.com/ilya-kolchinsky/ToolScope/pull/24 |
-| operate-first/support | Granted developer access for OS-Climate user. | https://github.com/operate-first/support/issues/613 |
+| Green-Software-Foundation/gaic | Opened an issue to explore potential collaboration with CNCF on a sustainable AI architecture for cloud-native environments. | https://github.com/Green-Software-Foundation/gaic/issues/10 |
+| InnerSourceCommons/InnerSourcePatterns | Submitted a pattern draft for the Internal Developer Platform. This is critical in enhancing internal development processes using open-source guidelines. | https://github.com/InnerSourceCommons/InnerSourcePatterns/pull/720 |
+| ScottLogic/fluxnova-eval-demo | Contributed a pull request and worked on several issues to enhance macOS support, hardened evaluation workflows, and improved regression failure reporting for the demo environment. | https://github.com/ScottLogic/fluxnova-eval-demo/pull/31 |
+| aaif/ambassadors | Engaged in several issue submissions, including a keynote on AI landscape and various presentations at international events like GOSIM Shenzhen and Open Source Tech Day Korea 2026. | https://github.com/aaif/ambassadors/issues/1690 |
+| caldeirav/agentic-graphrag-finance | Merged several pull requests to improve agent functioning, including evaluation workflow enhancements and live SEC ingestion features, advancing the agentic finance platform. | https://github.com/caldeirav/agentic-graphrag-finance |
+| caldeirav/finagent-mesh-mcp | Contributed multiple pull requests and issues to improve decision scoring, latency improvements, and evaluation mechanisms in the agent workflow, crucial to MCP utilization. | https://github.com/caldeirav/finagent-mesh-mcp |
+| caldeirav/mcp-2026-07-28-schema-reliability-demo | Merged a pull request to showcase banking fund-transfer demo contrasting strict versus legacy MCP contracts. | https://github.com/caldeirav/mcp-2026-07-28-schema-reliability-demo/pull/1 |
+| caldeirav/mcp-mrtr-devops-demo | Enhanced observability and migration demos with two pull requests, delivering key components for fail-proof complex cloud-native AI systems. | https://github.com/caldeirav/mcp-mrtr-devops-demo/pull/2 |
+| caldeirav/mlflow-edd-financial-agent | Contributed a pull request for EDD financial assistant development, enhancing agent functionality with advanced management features. | https://github.com/caldeirav/mlflow-edd-financial-agent/pull/1 |
+| caldeirav/sub15-breaker | Merged numerous pull requests improving demo workflows and infrastructure resilience focusing on agent readiness and evaluation, essential for sub-15ms verification. | https://github.com/caldeirav/sub15-breaker/pull/79 |
+| cncf/toc | Merged a pull request and reviewed issues, contributing to distributed agent systems and cloud-native tooling discussions. | https://github.com/cncf/toc/pull/2368 |
+| finos-labs/ai-evals-framework | Expanded AI evaluation framework documentation, supporting initiatives like financial agents and contextual milestone definitions, essential for Finos ecosystem contributions. | https://github.com/finos-labs/ai-evals-framework/pull/27 |
+| finos-labs/finsight-agent | Addressed issues concerning earnings call processing, improved volatility model analyses, enhancing the observability and connectivity of AI tools in finance. | https://github.com/finos-labs/finsight-agent/issues/4 |
+| finos/community | Submitted and approved a proposal for an AI Evaluation Framework, enhancing community standards. | https://github.com/finos/community/issues/438 |
+| ilya-kolchinsky/ToolScope | Merged several pull requests and addressed issues in evaluation exporting, enhancing capabilities in model context, valuable for improving financial analytics pipelines. | https://github.com/ilya-kolchinsky/ToolScope/pull/24 |
 
 ---
 
@@ -46,8 +45,9 @@
 
 | Template / Asset Name | What You Built, Status & Reuse *(Draft/Live/GA, who is using it)* | Links *(Git repo, Google Docs/Slides, demo video)* |
 | :---- | :---- | :---- |
-| *Copy/paste row to add item* |  |  |
-| *Copy/paste row to add item* |  |  |
+| Apac Ai Coe Business Case | Outlined a business case for the APAC AI Center of Excellence, detailing objectives to accelerate AI adoption in the region through executive briefings and POCs. |  |
+| Mgf for Agentic AI (ATX Release) | Published a governance framework for agentic AI. Version 1.5 outlines risks and controls, pertinent for organizations advancing multi-agent systems. | https://example.com/api-docs |
+| Singapore AI COE Operating Model | Designed the operating model for the Singapore AI COE, establishing it as a hub for enterprise and sovereign AI R&D and engineering innovation. |  |
 
 ---
 
@@ -57,8 +57,9 @@
 
 | Customer / Segment / Opportunity | Activity & Outcome *(Note if closed win, active pipeline, or tech validation)* | Links *(CRM, sprint readout doc, architecture deck)* |
 | :---- | :---- | :---- |
-| *Copy/paste row to add item* |  |  |
-| *Copy/paste row to add item* |  |  |
+| Taiwan FSI Executive Briefing Center | Conducted advisory sessions with banks such as CTBC and Cathay United, focusing on AI lifecycle and cryptographic supply chain resilience. |  |
+| Thailand EBC Series | Hosted briefings with National ITMX and other financial institutions, aligning technology strategies with Red Hat’s cloud and AI offerings. | https://www.redhat.com/en/success-stories/national-itmx |
+| Maybank FlightPath Automation Assessment | Performed an automation assessment as part of their digital transformation initiative, highlighting significant areas for development and standardization. | https://openpracticelibrary.com/practice/vsm-and-mbpm/ |
 
 ---
 
@@ -68,44 +69,11 @@
 
 | Engagement / Event / Partner | Activity, Audience & Outcome *(Briefings, reach, joint build, or RFE impact)* | Links *(Slides, blog URL, event page, RFE tracker)* |
 | :---- | :---- | :---- |
-| LinkedIn post: Can we really treat raw model weights—or a model's internal reasoning—as a security… | Cohere’s security report sparked debate on treating model reasoning as a security boundary. | https://www.linkedin.com/posts/caldeirav_aisafety-cybersecurity-generativeai-activity-7527720177262678016-sLWZ |
-| LinkedIn post: Following my talk at Agent Substrate Day on Monday, the official announcement that Agent… | Agent Substrate joins CNCF, marking a step forward for cloud-native AI. | https://www.linkedin.com/posts/caldeirav_agent-substrate-day-instant-circuit-breakers-activity-7526453473077288960-RpQB |
-| LinkedIn post: It was a privilege to take the stage this past Friday at IBM One Madison for Columbia… | Presented at IBM for Columbia University’s event on AI: FinAI Evals Suite and Mellea. | https://www.linkedin.com/posts/caldeirav_reliable-ai-the-evolution-of-ai-evaluation-activity-7525347212135055360-c-Y2 |
-| LinkedIn post: Tomorrow at Agent Substrate Con, I will be speaking about one of the most critical… | Discussed AI agents' safety and performance bottlenecks at Agent Substrate Con. | https://www.linkedin.com/posts/caldeirav_tomorrow-at-agent-substrate-con-i-will-be-activity-7525338585751916544-6Jfq |
-| LinkedIn post: Earlier this week at the FINOS Open Source in Finance Forum (OSFF) in New York City,… | Addressed deploying autonomous workflows in finance at OSFF, NYC. | https://www.linkedin.com/posts/caldeirav_osff-nyc-2026-trusting-agentic-workflows-activity-7524514267497189376-OtTr |
-| LinkedIn post: Following the Open Source in Finance Forum (OSFF) in New York, I am excited to co-host… | Co-hosted a session on Reliable AI with IBM and Red Hat after OSFF. | https://www.linkedin.com/posts/caldeirav_reliable-ai-finai-evals-suite-and-mellea-activity-7523213104386859010-NMEi |
-| LinkedIn post: In regulated financial services, just because an AI system completes a task without… | Discussed AI systems completing tasks correctly in financial services despite potential hallucinations. | https://www.linkedin.com/posts/caldeirav_osff2026-finos-opensource-activity-7522867339147661312-wu5W |
-| LinkedIn post: Open Responses has just joined the Agentic AI Foundation, and the change is easier to… | Open Responses joins the Agentic AI Foundation, emphasizing agent operation efficiency. | https://www.linkedin.com/posts/caldeirav_one-request-for-every-model-your-agent-calls-activity-7521702744844460032-t_Ls |
-| LinkedIn post: Last week at GOSIM Shenzhen, I shared a perspective that often gets lost in the current… | Shared views on the diversity of AI architectures at GOSIM Shenzhen. | https://www.linkedin.com/posts/caldeirav_mapping-the-open-agentic-ai-landscape-activity-7518563134987534337-YNZd |
-| LinkedIn post: Asking one massive frontier model to do everything—pick a tool, route a document, rank… | Highlighted anti-patterns of using single models for multiple tasks in AI architectures. | https://www.linkedin.com/posts/caldeirav_tuning-decision-models-for-enterprise-agents-activity-7517533029192478720-2_CI |
-| LinkedIn post: Excited to head to Shenzhen for GOSIM Foundation 2026! I’ll be presenting "Mapping the… | Presented on mapping AI architectures at GOSIM Foundation 2026 in Shenzhen. | https://www.linkedin.com/posts/caldeirav_ai-agenticai-opensource-activity-7515626011343130625-e42t |
-| LinkedIn post: AI agents are bottlenecked not by a lack of intelligence, but by the operational tax of… | Discussed AI agents' bottlenecks due to decision-making latency. | https://www.linkedin.com/posts/caldeirav_decision-models-in-enterprise-agentic-architecture-activity-7515086045617774592-pqgi |
-| LinkedIn post: Earlier this week at Open Source Tech Day in Korea (OST Day), organised by the Ministry… | Addressed AI challenges and opportunities at OST Day, Korea. | https://www.linkedin.com/posts/caldeirav_the-sovereign-agentic-ai-stack-activity-7514605504556527616-dXYZ |
-| LinkedIn post: The Linux Foundation's new research, "Enterprise Transitions to the Agentic Era",… | New research published on enterprise AI transitions by the Linux Foundation. | https://www.linkedin.com/posts/caldeirav_enterprise-transitions-to-the-agentic-era-activity-7512712768450400257-0z8H |
-| LinkedIn post: If you are building AI agents with domain-specific Small Language Models (SLMs), you… | Discussed challenge of SLMs' performance in enterprise environments. | https://www.linkedin.com/posts/caldeirav_improve-slm-tool-calling-without-post-training-activity-7506635183937232896-EXrZ |
-| LinkedIn post: In my recent trip to India, I spoke with The Economic Times about the real challenges of… | Discussed challenges of scaling enterprise AI from experiments to full-scale production in India. | https://www.linkedin.com/posts/caldeirav_governance-not-models-is-the-biggest-obstacle-activity-7505823307334782976-W5qL |
-| LinkedIn post: Earlier this week I was invited by the ETSI NFV ISG to present at the 2nd AI Native Open… | Presented on cloud-native AI substrate before KubeCon China 2026 in Shanghai. | https://www.linkedin.com/posts/caldeirav_the-cloud-native-ai-substrate-activity-7504102595297423361-BdEZ |
-| LinkedIn post: Just wrapped up an incredibly busy trip to India, highlighted by time spent with our… | Engaged with Bangalore engineering center and clients to discuss AI evolution. | https://www.linkedin.com/posts/caldeirav_india-moves-beyond-ai-adoption-to-open-source-activity-7502279514807222272-3gEe |
-| LinkedIn post: With the recent Model Context Protocol (MCP) release, the AI community is taking a… | Discussed standardizing LLM connections to external tools and data. | https://www.linkedin.com/posts/caldeirav_what-if-your-agent-errors-could-tell-you-activity-7500284211577122819-_T-h |
-| LinkedIn post: True AI sovereignty isn't about building a digital island or where your data center… | Discussed AI sovereignty and Red Hat's vision at Open Source Summit Korea 2026. | https://www.linkedin.com/posts/caldeirav_%EC%98%A4%EB%8A%98%EC%9D%98-dt%EC%9D%B8-%E9%9F%93-%EC%86%8C%EB%B2%84%EB%A6%B0-ai-%EB%8F%84%EC%A0%84%EC%9D%80-%EB%8B%B9%EC%97%B0%ED%95%9C-%EC%84%A0%ED%83%9D-%EC%8B%A4%ED%8C%A8-%EB%91%90%EB%A0%A4%EC%9B%8C-%EB%A7%90%EC%95%84%EC%95%BC-activity-7497934780034899968-qSz7 |
-| LinkedIn post: A financial agent that “sounds right” could be a liability. In a financial workflow,… | Discussed risks of financial agents producing inaccurate information. | https://www.linkedin.com/posts/caldeirav_stop-trusting-the-black-box-evaluation-driven-activity-7495117395590672384-Y2xf |
-| LinkedIn post: The failure mode for agent context is not that we forget the rules. It is that we never… | Discussed agent context management in AGENTS.md documentation. | https://www.linkedin.com/posts/caldeirav_spec-driven-development-managing-autonomous-activity-7494650171708878848-qFAe |
-| LinkedIn post: Yesterday at Open Source Summit Korea 2026, in my session "𝗘𝘃𝗮𝗹-𝗗𝗿𝗶𝘃𝗲𝗻 𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗺𝗲𝗻𝘁:… | Shared insight on agent pilots at Open Source Summit Korea 2026. | https://www.linkedin.com/posts/caldeirav_eval-driven-development-activity-7493624051727413248-57Oo |
-| LinkedIn post: Yesterday at Open Source Summit Korea 2026, I delivered a morning keynote on "𝗦𝘁𝗼𝗽… | Delivered keynote on economic case for sovereign AI in South Korea. | https://www.linkedin.com/posts/caldeirav_the-economic-case-for-open-sovereign-ai-activity-7493300229333737472-uf3b |
-| LinkedIn post: If you build enterprise AI agents, human-in-the-loop approval is a strict requirement… | Discussed requirement of human-in-the-loop approval for enterprise AI agents. | https://www.linkedin.com/posts/caldeirav_human-approval-has-been-a-bottleneck-for-activity-7492907000771538944-9Di2 |
-| LinkedIn post: I am incredibly excited to share that the recording of my talk with Morgan Foster from… | Talk recording from KubeCon + CloudNativeCon Japan now available online. | https://www.linkedin.com/posts/caldeirav_architecting-secure-agentic-workflows-on-activity-7492903312531382272-abEU |
-| LinkedIn post: The true promise of AI isn't realized in a sandbox or a Jupyter notebook but in… | Discussed enterprise challenges in AI deployment at Open Source Summit India. | https://www.linkedin.com/posts/caldeirav_principal-forward-deployed-engineer-ai-activity-7489536409972711425-zKrx |
-| LinkedIn post: 𝗔𝘂𝘁𝗼𝗻𝗼𝗺𝗼𝘂𝘀 𝗔𝗜 𝗮𝗴𝗲𝗻𝘁𝘀 𝗯𝗿𝗲𝗮𝗸 𝘁𝗿𝗮𝗱𝗶𝘁𝗶𝗼𝗻𝗮𝗹 𝗭𝗲𝗿𝗼-𝗧𝗿𝘂𝘀𝘁 because they blur the line between… | Discussed Zero-Trust challenges with autonomous AI agents. | https://www.linkedin.com/posts/caldeirav_architecting-secure-agentic-workflows-on-activity-7488554083406999552-DW-i |
-| LinkedIn post: Are you ready to shape the future of 𝗱𝗶𝘀𝘁𝗿𝗶𝗯𝘂𝘁𝗲𝗱 𝗔𝗜 𝗮𝘁 𝘀𝗰𝗮𝗹𝗲? My team at Red Hat is… | Called for a visionary Chief Architect to drive distributed AI infrastructure. | https://www.linkedin.com/posts/caldeirav_senior-principal-chief-architect-enterprise-activity-7485702968185475073-otgz |
-| LinkedIn post: Have you ever built a Retrieval-Augmented Generation (RAG) pipeline over 10-Ks or 10-Qs… | Discussed challenges in RAG pipelines extracting incorrect fiscal year data. | https://www.linkedin.com/posts/caldeirav_stop-chunking-tables-how-we-built-an-agentic-activity-7485677792794353664-rfuL |
-| LinkedIn post: Great discussion today with Shanker V Selvadurai at 𝗜𝗕𝗠 𝗧𝗵𝗶𝗻𝗸 𝗼𝗻 𝗧𝗼𝘂𝗿 𝗦𝗶𝗻𝗴𝗮𝗽𝗼𝗿𝗲 𝟮𝟬𝟮𝟲 on… | Great discussion on AI sovereignty at IBM Think on Tour Singapore 2026. | https://www.linkedin.com/posts/caldeirav_great-discussion-today-with-shanker-v-selvadurai-activity-7485349538019311616-qK1o |
-| LinkedIn post: Today at the WAIC 2026 AI Open Compute and Agent Ecosystem Forum in Shanghai, I… | Discussed need for unified AI open compute ecosystem at WAIC 2026. | https://www.linkedin.com/posts/caldeirav_waic-shanghai-2026-technical-autonomy-in-activity-7484626939031285760-5zYk |
-| LinkedIn post: I am excited to be back in Shanghai this week to speak at the WAIC - World Artificial… | Spoke on technical autonomy in enterprise at WAIC 2026, Shanghai. | https://www.linkedin.com/posts/caldeirav_%E4%B8%96%E7%95%8C%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD%E5%A4%A7%E4%BC%9A-activity-7482306062327422976-qJkv |
-| LinkedIn post: AI coding assistants have drastically accelerated how fast we write software. But in a… | Discussed risks of unstructured coding in enterprises at OSS India 2026. | https://www.linkedin.com/posts/caldeirav_spec-driven-development-an-enterprise-base-activity-7481386250042515456-L9-9 |
-| LinkedIn post: As enterprises scale SaaS-based 𝗔𝗜 𝗰𝗼𝗱𝗶𝗻𝗴 𝗮𝘀𝘀𝗶𝘀𝘁𝗮𝗻𝘁𝘀, they run face-first into a dual… | Discussed token economics and data privacy risks with SaaS AI assistants. | https://www.linkedin.com/posts/caldeirav_github-rh-ai-quickstartprivate-coding-assistant-activity-7480617390586757120-DRr1 |
-| LinkedIn post: 𝗧𝗿𝘂𝗲 𝗱𝗶𝗴𝗶𝘁𝗮𝗹 𝘀𝗼𝘃𝗲𝗿𝗲𝗶𝗴𝗻𝘁𝘆 𝗶𝘀𝗻’𝘁 𝗮𝗯𝗼𝘂𝘁 𝗶𝘀𝗼𝗹𝗮𝘁𝗶𝗼𝗻 𝗯𝘂𝘁 𝗮𝗯𝗼𝘂𝘁 𝗲𝗺𝗽𝗼𝘄𝗲𝗿𝗶𝗻𝗴 𝗰𝗵𝗼𝗶𝗰𝗲. I’m excited… | Shared recent OSS India session recording on digital sovereignty. | https://www.linkedin.com/posts/caldeirav_decoding-the-open-source-blueprint-for-indias-activity-7479750253718536192-UCiz |
-| LinkedIn post: Exciting news! The recording of my KubeCon 2026 talk with Anindita Sinha Banerjee,… | KubeCon 2026 talk recording on dynamic model selection now live. | https://www.linkedin.com/posts/caldeirav_beyond-monolithic-ai-cloud-native-patterns-activity-7478635180409327616-nNV0 |
-| LinkedIn post: I’m speaking at #KubeCon + #CloudNativeCon Japan in Yokohama July 28-30, together with… | Speaking engagement on secure workflows at KubeCon + CloudNativeCon, Japan. | https://www.linkedin.com/posts/caldeirav_kubecon-cloudnativecon-activity-7478267091834421250-nNJi |
+| KubeCon + CloudNativeCon Japan 2026 | Spoke on secure agentic workflows, addressing industry challenges in deploying AI agents using Kubernetes, with coverage on security and tool access. |  |
+| FINOS OSFF New York 2026 | Discussed the encapsulation of dynamic reasoning loops in financial services, attending open-source event to improve agents’ orchestration strategies. | https://www.linkedin.com/posts/caldeirav_osff-nyc-2026-trusting-agentic-workflows-activity-7524514267497189376-OtTr |
+| Singapore AI Center of Excellence Launch | Announced the APAC AI CoE launch supported by the Singapore EDB, aiming to enhance regional AI capabilities and deployment innovations. | https://www.redhat.com/en/about/press-releases/red-hat-opens-singapore-ai-centre-excellence-strategic-ai-innovation-hub-asia-paciﬁc |
+| Open Source Summit Korea 2026 | Keynoted on the economic case for open and sovereign AI, reinforcing South Korea’s alignment with open-source strategies for AI and semiconductor leadership. | https://www.linkedin.com/posts/caldeirav_the-economic-case-for-open-sovereign-ai-activity-7493300229333737472-uf3b |
+| GOSIM Shenzhen 2026 | Presented on the open agentic AI landscape, emphasizing digital sovereignty and modular AI architecture to a global audience. | https://www.linkedin.com/posts/caldeirav_mapping-the-open-agentic-ai-landscape-activity-7518563134987534337-YNZd |
 
 ---
 
@@ -135,7 +103,8 @@
 
 | Type *(Select or keep label)* | Initiative / Activity | Target Outcome, Timing, or Capacity Freed |
 | :---- | :---- | :---- |
-| **Must-Win Priority** | *Copy/paste row to add priority* |  |
+| Must-Win Priority | AI Center of Excellence Initiatives | Focus on collaboration with key stakeholders and operationalize AI proofs-of-concept to meet regional demand for production-grade solutions. |
+| Emerging Opportunity | Sovereign AI Ecosystem Development | Capitalize on open-source strategies to enhance local capabilities, aiming to solidify leadership within regional AI initiatives. |
 
 ---
 
@@ -152,9 +121,9 @@
 <details>
 <summary><strong>quarterly-pulse audit footer</strong> — sources queried, item counts, fallback warnings</summary>
 
-- Generated at: 2026-11-16 20:50 +08
+- Generated at: 2026-11-16 21:10 +08
 - Model: openai:gpt-4o
-- Activity items: 83 gathered / 83 after deduplication / 83 used for synthesis (chunked pre-summarization: yes)
+- Activity items: 83 gathered / 83 after deduplication / 83 used for synthesis (chunked pre-summarization: no)
 
 | Source | Strategy used | Items | Warnings |
 | :---- | :---- | ----: | :---- |
@@ -162,6 +131,9 @@
 | linkedin | apify_actor | 38 | LinkedIn Member Data Portability API skipped: LINKEDIN_ACCESS_TOKEN is not set. / No LinkedIn export archive found in --docs-dir (expected Shares.csv / Articles/ / Positions.csv or a LinkedIn .zip). |
 | docs | local_documents | 17 | none |
 
-- Sections left with placeholder rows (no grounded data): Section 3, Section 4, Section 6, Section 7, Section 8, Section 9
+- Sections left with placeholder rows (no grounded data): Section 6, Section 7, Section 9
+
+- Grounding guardrail: removed URLs not present in retrieved sources:
+  - EngagementRow.links: removed ungrounded URL https://bit.ly/4eQkVCO
 
 </details>

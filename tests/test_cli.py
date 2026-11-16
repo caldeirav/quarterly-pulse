@@ -127,6 +127,7 @@ class TestEndToEndOffline:
         assert "unconfigured" in text
         assert "LinkedIn data unavailable" in text
         assert "openai:gpt-4o" in text
+        assert "Report rows per section" in text
 
     def test_default_output_written_to_cwd(
         self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
