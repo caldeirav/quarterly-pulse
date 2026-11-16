@@ -261,3 +261,143 @@ class TestConnectorSafetyNet:
         assert docs_result.strategy == "failed"
         assert any("crashed" in warning for warning in docs_result.warnings)
         assert any("unexpected docs connector bug" in warning for warning in docs_result.warnings)
+
+
+class TestCaching:
+    def _invoke(self, runner_args: list[str], monkeypatch, report: QuarterReport):
+        fake_model = StructuredFakeChatModel(responses=["x"])
+        fake_model.scripted = {"QuarterReport": [report]}
+        monkeypatch.setattr(cli_module, "init_chat_model", lambda model_id: fake_model)
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        return runner.invoke(app, runner_args)
+
+    def test_cache_roundtrip_skips_connectors(
+        self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
+    ) -> None:
+        _install_fakes(monkeypatch, docs_dir, _e2e_report())
+        monkeypatch.chdir(tmp_path)  # keep the developer's real .env out of Settings()
+        cache = tmp_path / "cache.json"
+
+        result1 = self._invoke(
+            [
+                "--template", str(template_path),
+                "--docs-dir", str(docs_dir),
+                "--start-date", "2026-08-01",
+                "--end-date", "2026-09-30",
+                "--output", str(tmp_path / "first.md"),
+                "--cache", str(cache),
+            ],
+            monkeypatch,
+            _e2e_report(),
+        )
+        assert result1.exit_code == 0, result1.output
+        assert cache.is_file()
+        assert "wrote" in result1.output  # [cache] wrote ... on stderr (mixed in)
+
+        # Second run: any connector invocation is fatal — proves they are skipped.
+        async def must_not_run(*args, **kwargs):
+            raise AssertionError("connectors must not run when a cache is used")
+
+        monkeypatch.setattr(cli_module, "fetch_github_activity", must_not_run)
+        monkeypatch.setattr(cli_module, "fetch_linkedin_activity", must_not_run)
+        monkeypatch.setattr(cli_module, "fetch_docs_activity", must_not_run)
+
+        result2 = self._invoke(
+            [
+                "--template", str(template_path),
+                "--docs-dir", str(docs_dir),
+                "--start-date", "2026-08-01",
+                "--end-date", "2026-09-30",
+                "--output", str(tmp_path / "second.md"),
+                "--cache", str(cache),
+            ],
+            monkeypatch,
+            _e2e_report(),
+        )
+        assert result2.exit_code == 0, result2.output
+        assert "loaded" in result2.output  # [cache] loaded N items ...
+        text2 = (tmp_path / "second.md").read_text(encoding="utf-8")
+        assert "Sources loaded from cache" in text2  # audit footer reflects the cache
+
+    def test_cache_window_mismatch_warns(
+        self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
+    ) -> None:
+        _install_fakes(monkeypatch, docs_dir, _e2e_report())
+        monkeypatch.chdir(tmp_path)
+        cache = tmp_path / "cache.json"
+
+        first = self._invoke(
+            [
+                "--template", str(template_path),
+                "--docs-dir", str(docs_dir),
+                "--start-date", "2026-08-01",
+                "--end-date", "2026-09-30",
+                "--output", str(tmp_path / "a.md"),
+                "--cache", str(cache),
+            ],
+            monkeypatch,
+            _e2e_report(),
+        )
+        assert first.exit_code == 0, first.output
+
+        second = self._invoke(
+            [
+                "--template", str(template_path),
+                "--docs-dir", str(docs_dir),
+                "--start-date", "2026-07-01",  # different window than the cache
+                "--end-date", "2026-09-30",
+                "--output", str(tmp_path / "b.md"),
+                "--cache", str(cache),
+            ],
+            monkeypatch,
+            _e2e_report(),
+        )
+        assert second.exit_code == 0, second.output
+        assert "cache was gathered for 2026-08-01..2026-09-30" in second.output
+
+    def test_refresh_regathers_and_overwrites(
+        self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
+    ) -> None:
+        _install_fakes(monkeypatch, docs_dir, _e2e_report())
+        monkeypatch.chdir(tmp_path)
+        cache = tmp_path / "cache.json"
+
+        first = self._invoke(
+            [
+                "--template", str(template_path),
+                "--docs-dir", str(docs_dir),
+                "--start-date", "2026-08-01",
+                "--end-date", "2026-09-30",
+                "--output", str(tmp_path / "a.md"),
+                "--cache", str(cache),
+            ],
+            monkeypatch,
+            _e2e_report(),
+        )
+        assert first.exit_code == 0, first.output
+
+        calls = {"github": 0}
+
+        async def counting_github(handle, start_date, end_date, settings):
+            calls["github"] += 1
+            return ConnectorResult(source="github", strategy="graphql_api + search_api", items=[])
+
+        monkeypatch.setattr(cli_module, "fetch_github_activity", counting_github)
+
+        second = self._invoke(
+            [
+                "--template", str(template_path),
+                "--docs-dir", str(docs_dir),
+                "--start-date", "2026-08-01",
+                "--end-date", "2026-09-30",
+                "--output", str(tmp_path / "b.md"),
+                "--cache", str(cache),
+                "--refresh",
+            ],
+            monkeypatch,
+            _e2e_report(),
+        )
+        assert second.exit_code == 0, second.output
+        assert calls["github"] == 1  # connectors re-ran despite the cache
+        assert "wrote" in second.output  # cache overwritten
