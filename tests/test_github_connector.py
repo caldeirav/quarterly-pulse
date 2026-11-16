@@ -9,6 +9,8 @@ import respx
 
 from quarterly_pulse.connectors import github as github_module
 from quarterly_pulse.connectors.github import (
+    CONTRIBUTIONS_QUERY,
+    _aggregate_by_repo,
     _dedupe_by_url,
     fetch_github_activity,
     map_graphql_contributions,
@@ -57,6 +59,38 @@ class TestMapGraphqlContributions:
         payload = {"errors": [{"message": "Bad credentials"}], "data": {"user": None}}
         map_graphql_contributions(payload, HANDLE, warnings)
         assert any("Bad credentials" in warning for warning in warnings)
+        # Errors already explain the failure; no misleading "not found" on top.
+        assert not any("not found" in warning for warning in warnings)
+
+    def test_truncated_nodes_warn(self) -> None:
+        warnings: list[str] = []
+        payload = {
+            "data": {
+                "user": {
+                    "contributionsCollection": {
+                        "issueContributions": {"totalCount": 103, "nodes": []},
+                    }
+                }
+            }
+        }
+        map_graphql_contributions(payload, HANDLE, warnings)
+        assert any("truncated" in warning for warning in warnings)
+
+
+class TestQueryShape:
+    """Regression guards for GitHub GraphQL schema changes (e.g. ContributionOrder)."""
+
+    def test_order_by_has_no_field_argument(self) -> None:
+        assert "field: OCCURRED_AT" not in CONTRIBUTIONS_QUERY
+        assert "orderBy: {direction: DESC}" in CONTRIBUTIONS_QUERY
+
+    def test_cursor_variables_default_to_null(self) -> None:
+        assert "$prAfter: String = null" in CONTRIBUTIONS_QUERY
+        assert "$issueAfter: String = null" in CONTRIBUTIONS_QUERY
+        assert "$reviewAfter: String = null" in CONTRIBUTIONS_QUERY
+
+    def test_connections_expose_page_info(self) -> None:
+        assert CONTRIBUTIONS_QUERY.count("pageInfo { hasNextPage endCursor }") == 3
 
 
 class TestMapSearchResults:
@@ -100,9 +134,54 @@ class TestDedupe:
         assert len(_dedupe_by_url(items)) == 1
 
 
+class TestAggregateByRepo:
+    def _pr(self, repo: str, number: int, merged: bool = True) -> ActivityItem:
+        owner, name = repo.split("/")
+        return ActivityItem(
+            source="github",
+            date=None,
+            title=f"PR: change {number} ({repo})",
+            summary="did a thing",
+            impact="merged" if merged else "open",
+            url=f"https://github.com/{owner}/{name}/pull/{number}",
+        )
+
+    def test_items_merge_into_one_per_repo(self) -> None:
+        items = [
+            self._pr("acme/platform", 1),
+            self._pr("acme/platform", 2, merged=False),
+            ActivityItem(
+                source="github",
+                title="Commits: acme/platform (27 commits)",
+                impact="27 commits",
+                url="https://github.com/acme/platform",
+            ),
+            self._pr("other/repo", 9),
+        ]
+        aggregated = _aggregate_by_repo(items)
+
+        assert [item.title for item in aggregated] == ["GitHub: acme/platform", "GitHub: other/repo"]
+        acme = aggregated[0]
+        assert acme.impact == "2 pull requests (1 merged), 27 commits"
+        assert acme.url == "https://github.com/acme/platform"
+        assert "https://github.com/acme/platform/pull/1" in acme.raw_context
+        assert "https://github.com/acme/platform/pull/2" in acme.raw_context
+        assert "change 1" in acme.summary and "change 2" in acme.summary
+
+    def test_repo_extracted_from_title_when_no_url(self) -> None:
+        items = [ActivityItem(source="github", title="Issue: RFC thing (upstream/proj)")]
+        aggregated = _aggregate_by_repo(items)
+        assert [item.title for item in aggregated] == ["GitHub: upstream/proj"]
+        assert aggregated[0].impact == "1 issue"
+
+    def test_unrecognizable_items_stay_standalone(self) -> None:
+        items = [ActivityItem(source="github", title="weird item", url=None)]
+        assert _aggregate_by_repo(items) == items
+
+
 class TestFetchViaHttpx:
     @respx.mock
-    async def test_token_strategy_queries_both_apis_and_dedupes(
+    async def test_token_strategy_aggregates_per_repo(
         self, github_graphql_response: dict, github_search_response: dict, make_settings
     ) -> None:
         graphql_route = respx.post("https://api.github.com/graphql").mock(
@@ -118,12 +197,29 @@ class TestFetchViaHttpx:
 
         assert result.strategy == "graphql_api + search_api"
         assert result.warnings == []
-        assert len(result.items) == 8  # 7 GraphQL + 2 search - 1 URL duplicate
-        urls = {item.url for item in result.items}
-        assert "https://github.com/upstream-project/fleet-operator/pull/42" in urls
+        # One aggregated item per repository (GraphQL + Search, deduped by URL).
+        assert [item.title for item in result.items] == [
+            "GitHub: acme-internal/platform",
+            "GitHub: kubernetes-sigs/kueue",
+            "GitHub: quarterly-pulse/quarterly-pulse",
+            "GitHub: upstream-project/fleet-operator",
+        ]
+
+        upstream = result.items[3]
+        assert upstream.url == "https://github.com/upstream-project/fleet-operator"
+        assert upstream.impact == "1 pull request (1 merged), 1 issue, 2 PR reviews"
+        assert upstream.date == date(2026, 8, 20)  # latest activity in the group
+        assert "https://github.com/upstream-project/fleet-operator/pull/42" in upstream.raw_context
+        assert "https://github.com/upstream-project/fleet-operator/issues/100" in upstream.raw_context
+
+        acme = result.items[0]
+        assert acme.impact == "1 pull request, 27 commits, 1 PR review"
 
         auth = graphql_route.calls.last.request.headers["authorization"]
         assert auth == "Bearer ghp_test"
+        body = graphql_route.calls.last.request.content.decode()
+        assert "direction: DESC" in body
+        assert "OCCURRED_AT" not in body
         query = search_route.calls.last.request.url.params["q"]
         assert f"author:{HANDLE}" in query
         assert "created:>=2026-08-01" in query
@@ -148,19 +244,75 @@ class TestFetchViaHttpx:
         assert any("Search API" in warning for warning in result.warnings)
 
 
+class TestSearchPagination:
+    @respx.mock
+    async def test_search_follows_pages_beyond_the_first(self, make_settings) -> None:
+        def _search_item(index: int) -> dict:
+            return {
+                "title": f"item {index}",
+                "html_url": f"https://github.com/org-{index // 100}/repo-{index}/pull/{index}",
+                "state": "open",
+                "created_at": "2026-08-15T00:00:00Z",
+                "body": "",
+                "repository_url": f"https://api.github.com/repos/org-{index // 100}/repo-{index}",
+                "pull_request": {"merged_at": None},
+            }
+
+        respx.post("https://api.github.com/graphql").mock(
+            return_value=httpx.Response(
+                200, json={"data": {"user": {"login": HANDLE, "contributionsCollection": {}}}}
+            )
+        )
+        respx.get("https://api.github.com/search/issues").mock(
+            side_effect=[
+                httpx.Response(200, json={"total_count": 103, "items": [_search_item(i) for i in range(100)]}),
+                httpx.Response(200, json={"total_count": 103, "items": [_search_item(i) for i in range(100, 103)]}),
+            ]
+        )
+
+        result = await fetch_github_activity(
+            HANDLE, START_DATE, END_DATE, make_settings(github_token="ghp_test")
+        )
+
+        assert result.warnings == []
+        assert len(result.items) == 103  # every page collected, one repo item each
+
+    @respx.mock
+    async def test_search_truncation_warns(self, make_settings) -> None:
+        respx.post("https://api.github.com/graphql").mock(
+            return_value=httpx.Response(
+                200, json={"data": {"user": {"login": HANDLE, "contributionsCollection": {}}}}
+            )
+        )
+        respx.get("https://api.github.com/search/issues").mock(
+            side_effect=[
+                httpx.Response(200, json={"total_count": 1500, "items": []}),
+            ]
+        )
+
+        result = await fetch_github_activity(
+            HANDLE, START_DATE, END_DATE, make_settings(github_token="ghp_test")
+        )
+
+        assert any("truncated" in warning and "1500" in warning for warning in result.warnings)
+
+
 class TestFetchViaGhCli:
     async def test_gh_fallback_when_token_unset(
         self, github_graphql_response: dict, github_search_response: dict, make_settings, monkeypatch
     ) -> None:
-        async def fake_graphql(query: str, variables: dict[str, str]) -> dict:
+        async def fake_graphql(query: str, variables: dict[str, str | None]) -> dict:
             assert variables["handle"] == HANDLE
             assert variables["start"] == "2026-08-01T00:00:00Z"
             assert variables["end"] == "2026-10-01T00:00:00Z"
+            assert variables.get("prAfter") is None  # page-one cursors are null
             return github_graphql_response
 
-        async def fake_search(query: str) -> dict:
+        async def fake_search(query: str, page: int = 1) -> dict:
             assert f"author:{HANDLE}" in query
-            return github_search_response
+            if page == 1:
+                return github_search_response
+            return {"total_count": github_search_response["total_count"], "items": []}
 
         monkeypatch.setattr(github_module, "_run_gh_graphql", fake_graphql)
         monkeypatch.setattr(github_module, "_run_gh_search", fake_search)
@@ -169,7 +321,12 @@ class TestFetchViaGhCli:
 
         assert result.strategy == "gh_cli_fallback"
         assert result.warnings == []
-        assert len(result.items) == 8
+        assert [item.title for item in result.items] == [
+            "GitHub: acme-internal/platform",
+            "GitHub: kubernetes-sigs/kueue",
+            "GitHub: quarterly-pulse/quarterly-pulse",
+            "GitHub: upstream-project/fleet-operator",
+        ]
 
     async def test_gh_missing_degrades_gracefully(self, make_settings, monkeypatch) -> None:
         async def boom(args: list[str]) -> dict:

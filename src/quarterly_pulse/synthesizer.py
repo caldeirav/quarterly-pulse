@@ -35,20 +35,24 @@ from quarterly_pulse.models import ActivityItem, TemplateProfile
 #: Character budgets guarding the model context window.
 _CONTEXT_CHAR_BUDGET = 60_000
 _CHUNK_CHAR_BUDGET = 20_000
-_SUMMARY_CLIP = 200
-_IMPACT_CLIP = 120
-_RAW_CONTEXT_CLIP = 150
+_SUMMARY_CLIP = 600
+_IMPACT_CLIP = 200
+_RAW_CONTEXT_CLIP = 1500
 
 SYSTEM_PROMPT = """You are a meticulous quarterly-activity report writer for a technology contributor.
 
 STRICT GROUNDING RULES:
 - Use ONLY facts, customer names, metrics, numbers, dates, and URLs that appear in the provided activity records.
 - NEVER fabricate or guess customer names, metrics, or URLs. If no link exists in the records, leave the links cell empty.
-- Merge activities that describe the same underlying work (even across different sources) into a single row.
 - Prefer concrete outcomes, counts, and statuses found in the records over generic phrasing.
 - Keep each cell concise: at most about 30 words of plain text, no Markdown formatting inside cells.
 - Section 8 (Looking Ahead) and Section 9 (Help Needed & Team Radar) must contain rows ONLY when the records explicitly mention forward-looking commitments, roadmap items, or escalations. Otherwise return empty lists.
 - Set section_6_title only when section 6 rows exist, deriving a short title from their content (e.g. "Research & Internal Tooling").
+
+COMPLETENESS RULES:
+- GitHub records arrive pre-aggregated per repository: render exactly ONE row per GitHub repository item, citing the repository URL and the most notable PR/issue links from its raw_context.
+- Include EVERY LinkedIn post and EVERY local document record as its own row in the appropriate section; merge only exact duplicates of the same underlying item. NEVER drop or consolidate records merely because there are many of them.
+- When merging duplicates that describe the same underlying work, keep the richest description and all distinct links.
 
 SECTION MAPPING GUIDE:
 - Section 2, Open Source & Upstream Contributions: upstream PRs, commits, issues/RFCs, maintainership, community leadership.
@@ -88,8 +92,8 @@ SUMMARIZE_PROMPT = ChatPromptTemplate.from_messages(
             """You compress activity records as a pre-step for quarterly report synthesis.
 STRICT RULES:
 - Preserve every distinct fact, customer name, metric, and URL; never invent new ones.
-- Merge exact duplicate records.
-- Drop only clearly insignificant records (for example one-line typo fixes).""",
+- Merge exact duplicate records only.
+- Do not drop any records; the final report must include every LinkedIn post, every document, and every repository.""",
         ),
         ("human", "Activity records (JSON):\n{records}\n\nReturn the distilled records."),
     ]
@@ -370,15 +374,23 @@ def _prompt_vars(
 
 _CELL_URL_RE = re.compile(r"https?://[^\s)|]+")
 _DOC_PATH_RE = re.compile(r"document: ([^;]+)")
+_RAW_URL_RE = re.compile(r"https?://[^\s;,|]+")
 
 
 def _allowed_urls(items: Iterable[ActivityItem]) -> set[str]:
-    """URLs and document paths that may appear in generated report cells."""
+    """URLs and document paths that may appear in generated report cells.
+
+    Besides each item's canonical URL, every URL embedded in an item's
+    ``raw_context`` counts as grounded (per-repo GitHub aggregates list their
+    individual PR/issue links there).
+    """
     allowed: set[str] = set()
     for item in items:
         if item.url:
             allowed.add(item.url)
-        match = _DOC_PATH_RE.search(item.raw_context)
+        for match in _RAW_URL_RE.finditer(item.raw_context or ""):
+            allowed.add(match.group(0).rstrip(".,;:"))
+        match = _DOC_PATH_RE.search(item.raw_context or "")
         if match:
             allowed.add(match.group(1).strip())
     return allowed

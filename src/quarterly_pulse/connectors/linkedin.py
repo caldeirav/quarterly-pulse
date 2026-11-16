@@ -31,6 +31,7 @@ import zipfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from pydantic import BaseModel
@@ -587,11 +588,26 @@ def _records_to_items(records: list[ShareRecord], start_date: date, end_date: da
                 summary=_clip(record.text, _TEXT_CLIP),
                 impact=record.stats
                 or (f"visibility: {record.visibility}" if record.visibility else ""),
-                url=record.url,
+                url=_clean_share_url(record.url),
                 raw_context=f"linkedin {record.kind}: {label}",
             )
         )
     return items
+
+
+def _clean_share_url(url: str | None) -> str | None:
+    """Strip tracking parameters (``utm_*``, ``rcm``) from share URLs for clean report links."""
+    if not url:
+        return url
+    split = urlsplit(url)
+    if not split.query:
+        return url
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(split.query)
+        if not key.lower().startswith("utm_") and key.lower() not in ("rcm", "rm")
+    ]
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(kept), split.fragment))
 
 
 def _parse_linkedin_datetime(value: str | int | None) -> date | None:
