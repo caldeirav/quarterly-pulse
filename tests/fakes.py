@@ -21,7 +21,9 @@ class StructuredFakeChatModel(FakeListChatModel):
 
     def with_structured_output(self, schema, **kwargs: Any) -> RunnableLambda:
         schema_name = getattr(schema, "__name__", str(schema))
-        queue = list(self.scripted.get(schema_name, []))
+        # Shared per-schema queue: sequential chains (main synthesis, then the
+        # left-out-items retry) consume scripted responses in order.
+        queue = self.scripted.setdefault(schema_name, [])
 
         def _run(prompt_input: Any) -> Any:
             self.inputs_seen.append((schema_name, prompt_input))

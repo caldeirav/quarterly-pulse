@@ -150,8 +150,8 @@ class TestThirdPartyStrategies:
         item = result.items[0]
         assert item.date == date(2026, 8, 30)  # nested posted_at.date parsed
         assert item.url == "https://www.linkedin.com/posts/caldeirav_recap-1"
-        assert "42 reactions" in item.impact
-        assert "7 comments" in item.impact
+        assert item.impact == ""  # no engagement stats in report content
+        assert "Q3 field enablement recap" in item.summary
 
     async def test_apify_wrapped_dataset_response(
         self, make_settings, monkeypatch, tmp_path: Path

@@ -220,10 +220,58 @@ class TestFetchViaHttpx:
         body = graphql_route.calls.last.request.content.decode()
         assert "direction: DESC" in body
         assert "OCCURRED_AT" not in body
+        assert "description" in body
         query = search_route.calls.last.request.url.params["q"]
         assert f"author:{HANDLE}" in query
-        assert "created:>=2026-08-01" in query
-        assert "created:<2026-10-01" in query
+        # Inclusive range syntax: repeated created: qualifiers get OR'd by GitHub.
+        assert "created:2026-08-01..2026-09-30" in query
+
+    @respx.mock
+    async def test_out_of_window_items_dropped_client_side(self, make_settings) -> None:
+        """Even if an API leaks pre-window items, the connector must drop them."""
+        stale_payload = {
+            "data": {
+                "user": {
+                    "login": HANDLE,
+                    "contributionsCollection": {
+                        "pullRequestContributions": {
+                            "totalCount": 1,
+                            "nodes": [
+                                {
+                                    "occurredAt": "2024-05-22T00:00:00Z",
+                                    "pullRequest": {
+                                        "title": "[TOC Candidacy] Vincent Caldeira",
+                                        "state": "CLOSED",
+                                        "merged": False,
+                                        "url": "https://github.com/finos/technical-oversight-committee/issues/1",
+                                        "body": "",
+                                        "repository": {
+                                            "nameWithOwner": "finos/technical-oversight-committee",
+                                            "url": "https://github.com/finos/technical-oversight-committee",
+                                            "isPrivate": False,
+                                            "description": "FINOS Technical Oversight Committee",
+                                        },
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                }
+            }
+        }
+        respx.post("https://api.github.com/graphql").mock(
+            return_value=httpx.Response(200, json=stale_payload)
+        )
+        respx.get("https://api.github.com/search/issues").mock(
+            return_value=httpx.Response(200, json={"total_count": 0, "items": []})
+        )
+
+        result = await fetch_github_activity(
+            HANDLE, START_DATE, END_DATE, make_settings(github_token="ghp_test")
+        )
+
+        assert result.items == []  # 2024 entry dropped despite being returned
+        assert result.warnings == []
 
     @respx.mock
     async def test_http_failures_degrade_gracefully(self, make_settings) -> None:

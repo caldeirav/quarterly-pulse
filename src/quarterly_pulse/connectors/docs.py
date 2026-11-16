@@ -33,6 +33,9 @@ INTERESTING_URL_PREFIXES = (
     "https://github.com/",
     "https://raw.githubusercontent.com/",
 )
+#: Exported email content (From:/To:/Subject: headers) is common in docs dirs.
+_EMAIL_HEADER_RE = re.compile(r"^(From|To|Cc|Bcc|Subject|Sent|Date):", re.MULTILINE | re.IGNORECASE)
+_EMAIL_SUBJECT_RE = re.compile(r"^Subject:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
 _SUMMARY_CLIP = 1000
 _MAX_URLS_CAPTURED = 5
 
@@ -96,17 +99,21 @@ def _process_document(
     item_date = in_window[0] if in_window else file_date
     relative_path = path.relative_to(docs_dir).as_posix()
     urls = _extract_urls(text)
+    subject, is_email = _email_metadata(text)
+    title = subject or _document_title(text, path)
 
     return (
         ActivityItem(
             source="docs",
             date=item_date,
-            title=_document_title(text, path),
+            title=title,
             summary=_clip(_strip_markup(text), _SUMMARY_CLIP),
             impact="",
             url=_primary_url(urls),
             raw_context=(
-                f"document: {relative_path}; dates found: "
+                f"document: {relative_path}; "
+                + (f"email; subject: {subject}; " if is_email and subject else "")
+                + f"dates found: "
                 f"{', '.join(day.isoformat() for day in explicit_dates[:5]) or 'none'}; "
                 f"urls: {', '.join(urls[:_MAX_URLS_CAPTURED]) or 'none'}"
             ),
@@ -147,6 +154,21 @@ def _filesystem_date(path: Path) -> date:
     """The document's filesystem date: the later of mtime and ctime."""
     stat = path.stat()
     return datetime.fromtimestamp(max(stat.st_mtime, stat.st_ctime), tz=timezone.utc).date()
+
+
+def _email_metadata(text: str) -> tuple[str | None, bool]:
+    """Detect exported email content; return ``(subject, is_email)``.
+
+    Email exports (``From:``/``To:``/``Subject:`` headers) are common in docs
+    dirs; surfacing the subject lets the synthesizer correlate mail threads
+    with the events they concern (EBC briefings, customer summits).
+    """
+    head = text[:3000]
+    if not _EMAIL_HEADER_RE.search(head):
+        return None, False
+    match = _EMAIL_SUBJECT_RE.search(head)
+    subject = match.group(1).strip() if match else None
+    return subject, True
 
 
 def _document_title(text: str, path: Path) -> str:

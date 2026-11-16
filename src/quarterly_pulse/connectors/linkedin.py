@@ -66,7 +66,6 @@ class ShareRecord(BaseModel):
     text: str = ""
     url: str | None = None
     visibility: str | None = None
-    stats: str | None = None
 
 
 async def fetch_linkedin_activity(
@@ -424,7 +423,6 @@ async def _fetch_via_apify(settings: Settings, profile_url: str) -> list[ShareRe
                 occurred_at=_apify_post_date(post),
                 text=_first_key(post, "text", "commentary", "content") or "",
                 url=_first_key(post, "url", "postUrl", "post_url"),
-                stats=_apify_stats(post),
             )
         )
     return records
@@ -472,19 +470,6 @@ def _apify_post_date(post: dict[str, Any]) -> str | int | None:
     if isinstance(posted_at, dict):
         return posted_at.get("date") or posted_at.get("timestamp")
     return _first_key(post, "createdAt", "postedAt", "publishedAt", "date", "timestamp")
-
-
-def _apify_stats(post: dict[str, Any]) -> str | None:
-    """Render engagement stats (reactions/comments) for the report's impact column."""
-    stats = post.get("stats")
-    if not isinstance(stats, dict):
-        return None
-    parts: list[str] = []
-    if stats.get("total_reactions") is not None:
-        parts.append(f"{stats['total_reactions']} reactions")
-    if stats.get("comments") is not None:
-        parts.append(f"{stats['comments']} comments")
-    return ", ".join(parts) or None
 
 
 def _run_apify_actor(token: str, actor_id: str, run_input: dict[str, Any]) -> list[Any]:
@@ -589,8 +574,7 @@ def _records_to_items(records: list[ShareRecord], start_date: date, end_date: da
                 date=occurred,
                 title=label,
                 summary=_clip(record.text, _TEXT_CLIP),
-                impact=record.stats
-                or (f"visibility: {record.visibility}" if record.visibility else ""),
+                impact="",
                 url=_clean_share_url(record.url),
                 raw_context=f"linkedin {record.kind}: {label}",
             )
