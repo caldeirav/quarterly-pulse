@@ -142,14 +142,16 @@ class TestSynthesizeReport:
         assert "NEVER fabricate" in system
         assert "2-3 full sentences" in system
         assert "never stop at the first sentence" in system
+        assert "external summary and assessment" in system
+        assert "contributor's point of view" in system
         assert "ONE row per GitHub repository" in system
         assert "EVERY LinkedIn post" in system
         assert "EVERY gathered item must appear somewhere" in system
         assert "catch-all" in system
-        assert 'never prefix it with "LinkedIn"' in system
+        assert 'never prefixed with "LinkedIn"' in system
         assert "Do not mention reaction" in system
         assert "ONE row PER event or location" in system
-        assert "never a sentence quoted from the source text" in system
+        assert "Never use a sentence quoted or clipped from the source text" in system
         assert "use its description from the record" in system
         assert "Summit Connect" in system
         assert "AI Center of Excellence" in system
@@ -266,6 +268,7 @@ class TestCompletenessBackstop:
 
         assert result.backfilled_count == 0
         assert result.report.section_6_custom == []  # nothing needed the fallback
+        assert result.unplaced_items == []  # retry placed everything
         assert result.report.section_2_upstream[0].project_repo_contribution == "Fleet Operator GPU scheduling"
         assert len(result.report.section_5_engagements) == 1
         # Two model calls: main synthesis, then the left-out-items retry.
@@ -273,6 +276,40 @@ class TestCompletenessBackstop:
         _, retry_prompt = fake_model.inputs_seen[1]
         retry_messages = list(retry_prompt.messages)
         assert "left out" in retry_messages[1].content
+        # The retry sees the existing draft so it can skip covered content.
+        assert "Existing report draft" in retry_messages[1].content
+
+    async def test_covered_items_go_to_footer_not_duplicate_rows(
+        self, fake_model: StructuredFakeChatModel
+    ) -> None:
+        """Items the retry judges already covered must NOT become Section 6 rows."""
+        main = QuarterReport(
+            section_2_upstream=[
+                UpstreamContributionRow(
+                    project_repo_contribution="Fleet Operator GPU scheduling",
+                    what_you_did_and_why="Merged PR adding topology-aware GPU scheduling.",
+                    links="https://github.com/upstream-project/fleet-operator/pull/42",
+                )
+            ]
+        )
+        # Retry places the LinkedIn post but deliberately skips the docs item
+        # (the model judged it already covered — no row is created for it).
+        retry = QuarterReport(
+            section_5_engagements=[
+                EngagementRow(
+                    engagement_event_partner="Multi-Cluster RAG Reference Architecture announcement",
+                    activity_audience_outcome="Announced the architecture, now live with 6 field teams.",
+                    links="https://www.linkedin.com/posts/caldeirav_rag-activity-7234",
+                )
+            ]
+        )
+        fake_model.scripted = {"QuarterReport": [main, retry]}
+
+        result = await synthesize_report(PROFILE, _sample_items(), fake_model)
+
+        assert result.backfilled_count == 0
+        assert result.report.section_6_custom == []  # no duplicate dump
+        assert result.unplaced_items == ["Acme Corp POC readout"]  # surfaced for verification
 
     async def test_unrepresented_items_backfilled_to_section6(
         self, fake_model: StructuredFakeChatModel

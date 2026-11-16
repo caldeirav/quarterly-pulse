@@ -58,9 +58,10 @@ COMPLETENESS RULES:
 
 ROW CONTENT RULES:
 - GitHub repository rows: lead with what the repository is and does (use its description from the record) and what the contributor actually did there; keep pull request/issue/commit counts as supporting detail only, never as the main content.
-- LinkedIn posts: use the post's own headline or opening sentence as the row title (never prefix it with "LinkedIn"), and write a 2-3 sentence summary drawn from the post's own content. When the post coincides with presenting at, moderating, or attending an event, name the event and the talk. Do not mention reaction, comment, or follower counts.
+- LinkedIn posts: give the row a concise, descriptive name derived from the post (for example "Agent Substrate Day talk on instant circuit breakers"), never prefixed with "LinkedIn" and never a sentence quoted from the post. Write a 2-3 sentence summary drawn from the post's own content; when the post coincides with presenting at, moderating, or attending an event, name the event and the talk. Do not mention reaction, comment, or follower counts.
 - Event series (for example Summit Connect across cities, or several EBC briefings): create ONE row PER event or location. Never merge multiple events or locations into a single row.
-- Row titles must be concise, descriptive names for the activity — never a sentence quoted from the source text.
+- Row titles are concise, descriptive names written from the contributor's point of view — what the activity IS for the person reporting (for example "ITMX executive briefing", "Multi-cluster RAG reference architecture"). Never use a sentence quoted or clipped from the source text.
+- The activity/outcome (middle) column is an external summary and assessment: describe what was accomplished and why it matters as a knowledgeable observer assessing the contributor's quarter would — never a repetition or light rewording of the extracted source text.
 - Local documents and email exports: classify each into its best-fitting section — Section 3 (repeatable solution templates & reusable assets), Section 4 (customer-specific opportunities & field work, including customer summit and briefing readouts), Section 5 (industry and community engagements, including AI Center of Excellence programs), or Section 6 (custom workstream). Correlate email threads with the event they concern (EBC briefings, Summit Connect and other field events) instead of listing each email as a separate entry. Use the document's own title as the row title and summarize its actual content in 1-3 sentences.
 - Section 8 (Looking Ahead) and Section 9 (Help Needed & Team Radar): PROPOSE concrete recommendations derived from the records — work with momentum to continue or ship next quarter, customer engagements to follow up, emerging opportunities, activities to stop or deprioritize, and plausible escalations or decisions where leadership help is needed. These are suggestions the contributor will edit manually; never invent URLs, owners, dates, or metrics that are not in the records.
 - Copy URLs character-for-character from the records; never shorten, paraphrase, or reconstruct them.
@@ -115,7 +116,9 @@ RETRY_PROMPT = ChatPromptTemplate.from_messages(
         ("system", SYSTEM_PROMPT),
         (
             "human",
-            """A quarterly report draft accidentally left out the activity records below. Place EACH left-out record into the correct report section, following every rule above. Give every row a concise, descriptive name for the activity (never a quoted sentence), and write proper summaries.
+            """A quarterly report draft may have accidentally left out the activity records below.
+
+First compare each left-out record against the existing draft: when a record's content is already adequately represented by an existing row — even under different wording or without a link — do NOT create a new row for it. Create rows only for genuinely missing content, placed in the correct section following every rule above, with contributor-POV titles and external assessments.
 
 Contributor profile:
 - Name & Role: {name_role}
@@ -125,10 +128,13 @@ Contributor profile:
 - LinkedIn profile: {linkedin_url}
 - Key Goals / OKRs: {okrs}
 
+Existing report draft (JSON):
+{draft}
+
 Left-out activity records (JSON):
 {records}
 
-Return rows only for these left-out records.""",
+Return rows only for the left-out records that are genuinely missing from the draft.""",
         ),
     ]
 )
@@ -270,7 +276,11 @@ class SynthesisResult(BaseModel):
     chunked: bool = False
     backfilled_count: int = Field(
         default=0,
-        description="Items the model left out that were auto-added to Section 6 by the completeness backstop.",
+        description="Items auto-added to Section 6 by the deterministic fallback (retry failure only).",
+    )
+    unplaced_items: list[str] = Field(
+        default_factory=list,
+        description="Titles the retry pass judged already covered by existing rows (audit footer only).",
     )
     grounding_violations: list[str] = Field(default_factory=list)
 
@@ -324,13 +334,19 @@ async def synthesize_report(
 
     report = _drop_empty_rows(report)
     backfilled = 0
+    unplaced: list[str] = []
     missing = _find_unrepresented_items(report, deduped)
     if missing:
-        # Second chance: let the model place the left-out items properly
-        # (real names, correct sections); anything still missing falls back
-        # to the deterministic Section 6 append.
-        missing = await _retry_missing_items(report, profile, missing, model)
-        backfilled = _backfill_unrepresented(report, missing)
+        # Second chance: the model sees the draft plus the left-out records
+        # and places only genuinely missing ones. Items it judges already
+        # covered are surfaced in the audit footer — never duplicated as
+        # Section 6 rows. The deterministic backfill only engages when the
+        # retry pass itself fails.
+        retry_ok, still_missing = await _retry_missing_items(report, profile, missing, model)
+        if retry_ok:
+            unplaced = [_clip(item.title, 100) for item in still_missing]
+        else:
+            backfilled = _backfill_unrepresented(report, still_missing)
     violations = _validate_and_sanitize_grounding(report, _allowed_urls(deduped))
     return SynthesisResult(
         report=report,
@@ -339,6 +355,7 @@ async def synthesize_report(
         items_for_synthesis=len(records),
         chunked=chunked,
         backfilled_count=backfilled,
+        unplaced_items=unplaced,
         grounding_violations=violations,
     )
 
@@ -557,17 +574,34 @@ async def _retry_missing_items(
     profile: TemplateProfile,
     missing: list[ActivityItem],
     model: BaseChatModel,
-) -> list[ActivityItem]:
-    """Give the model a second chance to place left-out items; return any still missing."""
+) -> tuple[bool, list[ActivityItem]]:
+    """Second chance for left-out items; returns ``(retry_ok, still_missing)``.
+
+    The retry sees the existing draft alongside the left-out records and is
+    instructed to create rows only for genuinely missing content — items it
+    judges already covered come back as ``still_missing`` for the audit
+    footer rather than as duplicate rows.
+    """
     try:
         retry_chain: Runnable = RETRY_PROMPT | model.with_structured_output(QuarterReport)
         retry_report = await retry_chain.ainvoke(
-            _prompt_vars(profile, [_compact_item(item) for item in missing])
+            _retry_vars(profile, [_compact_item(item) for item in missing], report)
         )
-    except Exception:  # best effort: fall back to the deterministic backfill
-        return missing
+    except Exception:  # best effort: signal failure so the deterministic backfill engages
+        return False, missing
     _merge_report_rows(report, _drop_empty_rows(retry_report))
-    return _find_unrepresented_items(report, missing)
+    return True, _find_unrepresented_items(report, missing)
+
+
+def _retry_vars(
+    profile: TemplateProfile,
+    records: list[dict[str, str | None]],
+    draft: QuarterReport,
+) -> dict[str, str]:
+    """Template variables for the retry prompt: profile, left-out records, and the draft."""
+    variables = _prompt_vars(profile, records)
+    variables["draft"] = draft.model_dump_json(indent=1)
+    return variables
 
 
 def _merge_report_rows(base: QuarterReport, extra: QuarterReport) -> None:

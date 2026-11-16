@@ -587,7 +587,8 @@ def _first_sentence(text: str) -> str:
     """The post's first complete sentence — a proper row title, never a hard clip.
 
     Character-clipped titles read as cut off mid-thought in the report; a
-    full sentence (capped at ``_TITLE_CLIP``) always ends naturally.
+    full sentence (capped at ``_TITLE_CLIP`` on a word boundary, without an
+    ellipsis) always ends naturally.
     """
     cleaned = " ".join(text.split())
     if not cleaned:
@@ -595,7 +596,7 @@ def _first_sentence(text: str) -> str:
     match = re.search(r"[^.!?]*[.!?]", cleaned)
     sentence = match.group(0).strip() if match else cleaned
     if len(sentence) > _TITLE_CLIP:
-        return sentence[: _TITLE_CLIP - 1].rsplit(" ", 1)[0] + "…"
+        return sentence[:_TITLE_CLIP].rsplit(" ", 1)[0]
     return sentence
 
 

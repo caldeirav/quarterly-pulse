@@ -168,6 +168,14 @@ def render_audit_footer(audit: AuditReport) -> str:
             "auto-added to Section 6 (marked 'auto-added'); re-place or edit them manually."
         )
 
+    if audit.unplaced_items:
+        lines.append("")
+        lines.append(
+            f"- Not placed as separate rows ({len(audit.unplaced_items)} item(s) judged already "
+            "covered by existing rows — verify):"
+        )
+        lines.extend(f"  - {escape_cell(title)}" for title in audit.unplaced_items)
+
     if audit.empty_sections:
         joined = ", ".join(f"Section {number}" for number in audit.empty_sections)
         lines.append("")

@@ -435,7 +435,7 @@ class TestItemShape:
         records = [ShareRecord(kind="post", occurred_at="2026-08-30 10:00", text=text)]
         items = _records_to_items(records, date(2026, 8, 1), date(2026, 9, 30))
         assert len(items[0].title) <= 140
-        assert items[0].title.endswith("…")  # capped on a word boundary
+        assert not items[0].title.endswith("…")  # capped on a word boundary, no ellipsis
 
     def test_summary_keeps_enough_text_for_multi_sentence_descriptions(self) -> None:
         long_text = " ".join(f"Sentence number {i} about the event." for i in range(60))
