@@ -16,6 +16,9 @@ Design:
   exist in the retrieved source items, recording violations for the audit
   footer. Customer names, metrics, and numbers are constrained via strict
   system-prompt rules: never fabricate anything absent from the records.
+* Completeness is guaranteed deterministically: after a chunked model retry
+  pass for left-out records, anything still unrepresented is appended to
+  Section 6 as an ``auto-added`` row, so every gathered item becomes a row.
 """
 
 from __future__ import annotations
@@ -37,6 +40,10 @@ from quarterly_pulse.models import ActivityItem, TemplateProfile
 #: genuinely huge quarters (gpt-4o / claude-sonnet both handle 128k+ tokens).
 _CONTEXT_CHAR_BUDGET = 150_000
 _CHUNK_CHAR_BUDGET = 50_000
+#: Left-out records are retried in batches of roughly this size: one huge
+#: retry call invites the model to consolidate distinct posts back into
+#: topic-level rows — the exact failure the retry exists to fix.
+_RETRY_CHUNK_CHAR_BUDGET = 20_000
 _SUMMARY_CLIP = 1000
 _IMPACT_CLIP = 200
 _RAW_CONTEXT_CLIP = 1500
@@ -277,11 +284,7 @@ class SynthesisResult(BaseModel):
     chunked: bool = False
     backfilled_count: int = Field(
         default=0,
-        description="Items auto-added to Section 6 by the deterministic fallback (retry failure only).",
-    )
-    unplaced_items: list[str] = Field(
-        default_factory=list,
-        description="Titles the retry pass judged already covered by existing rows (audit footer only).",
+        description="Items auto-added to Section 6 by the deterministic fallback after the retry pass.",
     )
     grounding_violations: list[str] = Field(default_factory=list)
 
@@ -335,19 +338,16 @@ async def synthesize_report(
 
     report = _drop_empty_rows(report)
     backfilled = 0
-    unplaced: list[str] = []
     missing = _find_unrepresented_items(report, deduped)
     if missing:
         # Second chance: the model sees the draft plus the left-out records
-        # and places only genuinely missing ones. Items it judges already
-        # covered are surfaced in the audit footer — never duplicated as
-        # Section 6 rows. The deterministic backfill only engages when the
-        # retry pass itself fails.
-        retry_ok, still_missing = await _retry_missing_items(report, profile, missing, model)
-        if retry_ok:
-            unplaced = [_clip(item.title, 100) for item in still_missing]
-        else:
-            backfilled = _backfill_unrepresented(report, still_missing)
+        # in small sequential batches and places only genuinely missing ones.
+        # Whatever the retry still leaves out — the model consolidating
+        # distinct posts into topic-level rows is a persistent failure mode —
+        # is deterministically appended to Section 6: an auto-added row beats
+        # a missing item, and the contributor re-places entries manually.
+        still_missing = await _retry_missing_items(report, profile, missing, model)
+        backfilled = _backfill_unrepresented(report, still_missing)
     violations = _validate_and_sanitize_grounding(report, _allowed_urls(deduped))
     return SynthesisResult(
         report=report,
@@ -356,7 +356,6 @@ async def synthesize_report(
         items_for_synthesis=len(records),
         chunked=chunked,
         backfilled_count=backfilled,
-        unplaced_items=unplaced,
         grounding_violations=violations,
     )
 
@@ -575,23 +574,26 @@ async def _retry_missing_items(
     profile: TemplateProfile,
     missing: list[ActivityItem],
     model: BaseChatModel,
-) -> tuple[bool, list[ActivityItem]]:
-    """Second chance for left-out items; returns ``(retry_ok, still_missing)``.
+) -> list[ActivityItem]:
+    """Second chance for left-out items; returns those still unrepresented.
 
-    The retry sees the existing draft alongside the left-out records and is
-    instructed to create rows only for genuinely missing content — items it
-    judges already covered come back as ``still_missing`` for the audit
-    footer rather than as duplicate rows.
+    The left-out records are retried in small sequential batches, each seeing
+    the draft updated by the previous batch. A single huge retry call invites
+    the model to consolidate distinct posts — especially posts sharing
+    attached content — back into topic-level rows, the exact failure the
+    retry exists to fix; small batches keep every record individually
+    visible. The deterministic Section 6 backfill in the caller guarantees
+    that whatever is still left out becomes a row anyway.
     """
-    try:
-        retry_chain: Runnable = RETRY_PROMPT | model.with_structured_output(QuarterReport)
-        retry_report = await retry_chain.ainvoke(
-            _retry_vars(profile, [_compact_item(item) for item in missing], report)
-        )
-    except Exception:  # best effort: signal failure so the deterministic backfill engages
-        return False, missing
-    _merge_report_rows(report, _drop_empty_rows(retry_report))
-    return True, _find_unrepresented_items(report, missing)
+    retry_chain: Runnable = RETRY_PROMPT | model.with_structured_output(QuarterReport)
+    records = [_compact_item(item) for item in missing]
+    for chunk in _chunk_records(records, _RETRY_CHUNK_CHAR_BUDGET):
+        try:
+            retry_report = await retry_chain.ainvoke(_retry_vars(profile, chunk, report))
+        except Exception:  # best effort: skip the batch; the backfill catches its items
+            continue
+        _merge_report_rows(report, _filter_duplicate_retry_rows(report, _drop_empty_rows(retry_report)))
+    return _find_unrepresented_items(report, missing)
 
 
 def _retry_vars(
@@ -603,6 +605,44 @@ def _retry_vars(
     variables = _prompt_vars(profile, records)
     variables["draft"] = draft.model_dump_json(indent=1)
     return variables
+
+
+def _filter_duplicate_retry_rows(base: QuarterReport, extra: QuarterReport) -> QuarterReport:
+    """Drop retry rows that cite only URLs the draft already had.
+
+    A retry row exists to represent a left-out item, so it must cite
+    something new; a row whose every URL already appears in *base* re-covers
+    an item that is placed already and would render as a duplicate row.
+    Later retry batches re-placing posts cited by earlier batches is a
+    persistent model failure mode, so the check is deterministic.
+    """
+    existing = _report_urls(base)
+    filtered = QuarterReport(section_6_title=extra.section_6_title)
+    for section in _ROW_SECTIONS:
+        for row in getattr(extra, section):
+            urls = _row_urls(row)
+            if urls and urls.issubset(existing):
+                continue  # re-covers an already-cited item
+            getattr(filtered, section).append(row)
+    return filtered
+
+
+def _row_urls(row: BaseModel) -> set[str]:
+    """Every URL cited anywhere in a row's cells."""
+    urls: set[str] = set()
+    for field in type(row).model_fields:
+        urls.update(
+            match.group(0) for match in _CELL_URL_RE.finditer(getattr(row, field) or "")
+        )
+    return urls
+
+
+def _report_urls(report: QuarterReport) -> set[str]:
+    """Every URL cited anywhere in a report's cells."""
+    urls: set[str] = set()
+    for row, field in _iter_row_fields(report):
+        urls.update(match.group(0) for match in _CELL_URL_RE.finditer(getattr(row, field) or ""))
+    return urls
 
 
 def _merge_report_rows(base: QuarterReport, extra: QuarterReport) -> None:
@@ -631,7 +671,13 @@ def _find_unrepresented_items(
 
 
 def _item_markers(item: ActivityItem) -> list[str]:
-    """Lowercase strings that identify an item inside generated report cells."""
+    """Lowercase strings that identify an item inside generated report cells.
+
+    URL markers must stay verbatim: LinkedIn post URLs end in case-sensitive
+    random suffixes (e.g. ``-RpQB``), so a lowercased marker never matches a
+    cited link and a placed post would look unrepresented. Prose markers
+    (titles, doc paths, repo fragments) are lowercased for comparison.
+    """
     markers: list[str] = [item.url or ""]
     markers.extend(match.group(0) for match in _RAW_URL_RE.finditer(item.raw_context or ""))
     doc = _DOC_PATH_RE.search(item.raw_context or "")
@@ -640,13 +686,13 @@ def _item_markers(item: ActivityItem) -> list[str]:
     if item.source == "github":
         fragment = _REPO_FRAGMENT_RE.search(item.title)
         if fragment:
-            markers.append(fragment.group(1))
-    markers.append(item.title)
-    return [marker.lower() for marker in markers if marker]
+            markers.append(fragment.group(1).lower())
+    markers.append(item.title.lower())
+    return [marker for marker in markers if marker]
 
 
 def _marker_present(marker: str, lowered_cell_text: str, cell_urls: list[str]) -> bool:
-    """A marker matches when found verbatim (non-URL) or prefix-tolerantly (URL)."""
+    """A marker matches when found verbatim (URLs, case-sensitive) or prefix-tolerantly."""
     if marker.startswith("http"):
         return any(_is_grounded(cell_url, {marker}) for cell_url in cell_urls)
     return marker in lowered_cell_text

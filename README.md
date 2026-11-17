@@ -42,8 +42,10 @@ template (.md) ──► parser ──► contributor profile + section schemas 
   actionable message and writes no partial output.
 - **Nothing gathered gets dropped**: a deterministic coverage check verifies
   that every item's URLs, document path, repository, or title appear in the
-  draft; left-out records get a model retry pass judged against the draft and,
-  only if that fails, a Section 6 backstop row marked for manual re-placement.
+  draft; left-out records get a batched model retry pass against the live
+  draft, and anything still unrepresented is deterministically appended to
+  Section 6 as an auto-added row — every gathered item, including every
+  LinkedIn post sharing attached content, lands somewhere.
 - **Grounding safety**: every URL in the generated rows is validated against
   the retrieved source items (prefix-tolerant, so long links the model
   slightly truncated still count as grounded); anything ungrounded is stripped
@@ -146,15 +148,18 @@ report**:
 2. **Coverage check** — a deterministic pass looks for each item's
    identifying markers (URLs, document path, repository name, title) in the
    generated rows.
-3. **Retry pass** — left-out records are re-sent to the model together with
-   the draft. Coverage is judged strictly per item: a record counts as
-   covered only when a row cites the same link or is literally the same item
-   (same post URL, same document, same repository) — two posts about the same
-   event are still two rows. Items the retry judges already covered are
-   listed in the audit footer as not separately placed, never duplicated as
-   extra rows.
-4. **Backstop** — only when the retry pass itself fails are the remaining
-   items appended to Section 6 as `auto-added` rows for manual re-placement.
+3. **Retry pass** — left-out records are re-sent to the model in small
+   sequential batches, each seeing the draft updated by the previous batch
+   (one huge retry call invites the model to consolidate distinct posts back
+   into topic-level rows). Coverage is judged strictly per item: a record
+   counts as covered only when a row cites the same link or is literally the
+   same item (same post URL, same document, same repository) — two posts
+   about the same event are still two rows. Retry rows that only re-cite
+   URLs the draft already has are dropped as duplicates.
+4. **Backstop** — whatever the retry still leaves out is deterministically
+   appended to Section 6 as an `auto-added` row for manual re-placement, so
+   no gathered item — including any LinkedIn post sharing attached content —
+   is ever dropped from the report.
 
 The model follows — and the connectors pre-tag records for — these routing
 and row-quality rules:
@@ -189,8 +194,8 @@ and row-quality rules:
   help needed, derived from the gathered activity, for manual editing.
 - A collapsible `<details>` audit footer records sources queried, strategies
   used, item counts, deduplication stats, the model, per-section row counts,
-  empty sections, items the retry pass judged already covered, backstop and
-  cache details, and any fallback warnings or grounding fixes.
+  empty sections, backstop details, and any fallback warnings or grounding
+  fixes.
 
 ## Development
 
