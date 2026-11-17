@@ -374,28 +374,39 @@ def qbr(
 
     chat_model = _init_model(model_id, settings)
 
-    answers: list[dict[str, str]] = []
-    if no_interview:
-        typer.secho("Interview skipped (--no-interview); drafting with gaps noted.", err=True)
-    elif sys.stdin.isatty():
-        answers = _run_interview(config, reports, chat_model)
-    else:
-        typer.secho(
-            "stdin is not interactive; skipping the interview (use --no-interview to silence).",
-            err=True,
-            fg=typer.colors.YELLOW,
-        )
-
+    # One event loop for the whole command: the provider SDK's async client
+    # binds its connection pool to the loop of the first awaited call, so
+    # separate asyncio.run() calls (interview planning, then synthesis — or
+    # re-planning rounds) would reuse a client bound to an already-closed
+    # loop and fail with "Event loop is closed".
+    loop = asyncio.new_event_loop()
     try:
-        synthesis = asyncio.run(synthesize_qbr(config, reports, answers, chat_model))
-    except Exception as exc:  # fail loudly: no partial output on LLM failure
-        typer.secho(f"QBR synthesis with '{model_id}' failed: {exc}", err=True, fg=typer.colors.RED)
-        typer.secho(
-            "Check your provider API key (OPENAI_API_KEY / ANTHROPIC_API_KEY) and LLM_MODEL, then re-run.",
-            err=True,
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(code=1)
+        answers: list[dict[str, str]] = []
+        if no_interview:
+            typer.secho("Interview skipped (--no-interview); drafting with gaps noted.", err=True)
+        elif _stdin_is_interactive():
+            answers = _run_interview(config, reports, chat_model, loop)
+        else:
+            typer.secho(
+                "stdin is not interactive; skipping the interview (use --no-interview to silence).",
+                err=True,
+                fg=typer.colors.YELLOW,
+            )
+
+        try:
+            synthesis = loop.run_until_complete(
+                synthesize_qbr(config, reports, answers, chat_model)
+            )
+        except Exception as exc:  # fail loudly: no partial output on LLM failure
+            typer.secho(f"QBR synthesis with '{model_id}' failed: {exc}", err=True, fg=typer.colors.RED)
+            typer.secho(
+                "Check your provider API key (OPENAI_API_KEY / ANTHROPIC_API_KEY) and LLM_MODEL, then re-run.",
+                err=True,
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+    finally:
+        loop.close()
 
     output_path = output or default_output_path(config, Path.cwd())
     outputs = render_qbr_deck(template_path, synthesis, config, source_manifest(reports), output_path)
@@ -409,13 +420,29 @@ def qbr(
     )
 
 
+def _stdin_is_interactive() -> bool:
+    """True when stdin is a terminal (the interview can prompt safely).
+
+    Separated as a module function so tests can force the interactive path
+    under typer's CliRunner, which replaces ``sys.stdin`` during invocation.
+    """
+    return sys.stdin.isatty()
+
+
 def _run_interview(
-    config: QbrConfig, reports: list, chat_model: BaseChatModel
+    config: QbrConfig,
+    reports: list,
+    chat_model: BaseChatModel,
+    loop: asyncio.AbstractEventLoop,
 ) -> list[dict[str, str]]:
-    """Sequential clarifying interview per the SKILL.md contract (max 10)."""
+    """Sequential clarifying interview per the SKILL.md contract (max 10).
+
+    Every model call runs on *loop* — the same loop the later synthesis uses
+    — so the provider client stays bound to a single, open event loop.
+    """
     answers: list[dict[str, str]] = []
     while True:
-        plan = asyncio.run(plan_interview(config, reports, chat_model, answers))
+        plan = loop.run_until_complete(plan_interview(config, reports, chat_model, answers))
         typer.secho(f"\n{plan.context_summary}", err=True)
         if not plan.questions:
             typer.secho("No clarifying questions needed — generating the draft.", err=True)
