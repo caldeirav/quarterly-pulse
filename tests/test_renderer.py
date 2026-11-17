@@ -72,7 +72,6 @@ def _audit() -> AuditReport:
         backfilled_count=2,
         section_row_counts={2: 1, 4: 1, 6: 3, 8: 1},
         empty_sections=[3, 5, 7, 9],
-        unplaced_items=["Stale notes from an earlier cycle"],
         cache_gathered_at=datetime(2026, 11, 17, 10, 0),
         grounding_violations=[
             "UpstreamContributionRow.links: removed ungrounded URL https://example.com/fake"
@@ -205,8 +204,6 @@ class TestAuditFooter:
         assert "chunked pre-summarization: no" in footer
         assert "Report rows per section: Section 2: 1, Section 4: 1, Section 6: 3, Section 8: 1" in footer
         assert "auto-added to Section 6" in footer
-        assert "Not placed as separate rows" in footer
-        assert "Stale notes from an earlier cycle" in footer
         assert "Sources loaded from cache" in footer
 
     def test_footer_lists_empty_sections_and_violations(self) -> None:

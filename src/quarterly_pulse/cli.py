@@ -366,7 +366,6 @@ def _build_audit(
         section_row_counts=section_row_counts,
         empty_sections=empty_sections,
         grounding_violations=synthesis.grounding_violations,
-        unplaced_items=synthesis.unplaced_items,
         cache_gathered_at=cache_gathered_at,
     )
 

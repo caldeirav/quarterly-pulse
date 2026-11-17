@@ -274,7 +274,6 @@ class TestCompletenessBackstop:
 
         assert result.backfilled_count == 0
         assert result.report.section_6_custom == []  # nothing needed the fallback
-        assert result.unplaced_items == []  # retry placed everything
         assert result.report.section_2_upstream[0].project_repo_contribution == "Fleet Operator GPU scheduling"
         assert len(result.report.section_5_engagements) == 1
         # Two model calls: main synthesis, then the left-out-items retry.
@@ -288,10 +287,15 @@ class TestCompletenessBackstop:
         # posts about the same event still become rows.
         assert "cites the same link" in retry_messages[1].content
 
-    async def test_covered_items_go_to_footer_not_duplicate_rows(
+    async def test_items_the_retry_leaves_out_are_still_placed(
         self, fake_model: StructuredFakeChatModel
     ) -> None:
-        """Items the retry judges already covered must NOT become Section 6 rows."""
+        """Items the retry declines to place must still become rows.
+
+        The model consolidating distinct posts into topic-level rows is a
+        persistent failure mode, so the deterministic backfill runs after a
+        successful retry too: anything still unrepresented is appended to
+        Section 6 marked 'auto-added' rather than dropped from the report."""
         main = QuarterReport(
             section_2_upstream=[
                 UpstreamContributionRow(
@@ -316,9 +320,129 @@ class TestCompletenessBackstop:
 
         result = await synthesize_report(PROFILE, _sample_items(), fake_model)
 
+        # The left-out docs item became a guaranteed Section 6 row.
+        assert result.backfilled_count == 1
+        row = result.report.section_6_custom[0]
+        assert row.initiative_activity_name == "Acme Corp POC readout"
+        assert "auto-added" in row.what_you_did_outcome
+        assert row.links == "https://docs.google.com/presentation/d/abc123/edit"
+        # Injected links are grounded by construction.
+        assert result.grounding_violations == []
+
+    async def test_retry_runs_in_small_batches_against_the_updated_draft(
+        self,
+        fake_model: StructuredFakeChatModel,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Many left-out records are retried in sequential batches.
+
+        Each batch must see the draft updated by the previous batch (so it
+        does not re-place covered rows), and items no batch places still get
+        the deterministic Section 6 backfill."""
+        import quarterly_pulse.synthesizer as synthesizer
+
+        # Force one record per retry batch, deterministically, regardless of
+        # the exact serialized record sizes.
+        records = [synthesizer._compact_item(item) for item in deduplicate_items(_sample_items())]
+        sizes = [synthesizer._records_chars([record]) for record in records]
+        monkeypatch.setattr(synthesizer, "_RETRY_CHUNK_CHAR_BUDGET", min(
+            sizes[index] + sizes[other]
+            for index in range(len(sizes))
+            for other in range(index + 1, len(sizes))
+        ) - 1)
+
+        batch_place_post = QuarterReport(
+            section_5_engagements=[
+                EngagementRow(
+                    engagement_event_partner="Multi-Cluster RAG Reference Architecture announcement",
+                    activity_audience_outcome="Announced the architecture, now live with 6 field teams.",
+                    links="https://www.linkedin.com/posts/caldeirav_rag-activity-7234",
+                )
+            ]
+        )
+        batch_place_pr = QuarterReport(
+            section_2_upstream=[
+                UpstreamContributionRow(
+                    project_repo_contribution="Fleet Operator GPU scheduling",
+                    what_you_did_and_why="Merged PR adding topology-aware GPU scheduling.",
+                    links="https://github.com/upstream-project/fleet-operator/pull/42",
+                )
+            ]
+        )
+        # First pass is empty, then one retry batch per record; the last
+        # batch places nothing, leaving the docs item to the backfill.
+        fake_model.scripted = {
+            "QuarterReport": [QuarterReport(), batch_place_post, batch_place_pr, QuarterReport()]
+        }
+
+        result = await synthesize_report(PROFILE, _sample_items(), fake_model)
+
+        # Four model calls: main synthesis + three single-record retry batches.
+        assert len(fake_model.inputs_seen) == 4
+        # The second retry batch saw the draft containing batch 1's row.
+        _, second_batch_prompt = fake_model.inputs_seen[2]
+        assert "Multi-Cluster RAG Reference Architecture announcement" in (
+            list(second_batch_prompt.messages)[1].content
+        )
+        # The docs item was placed by no batch → deterministic backfill.
+        assert result.backfilled_count == 1
+        assert result.report.section_6_custom[0].initiative_activity_name == "Acme Corp POC readout"
+
+    async def test_retry_rows_reciting_existing_urls_are_dropped(
+        self, fake_model: StructuredFakeChatModel
+    ) -> None:
+        """A retry row citing only URLs the draft already has is a duplicate.
+
+        Later retry batches sometimes re-place posts cited by earlier batches
+        despite seeing the draft; such rows add no new coverage and must be
+        filtered out deterministically instead of rendering twice."""
+        main = QuarterReport(
+            section_5_engagements=[
+                EngagementRow(
+                    engagement_event_partner="Multi-Cluster RAG Reference Architecture announcement",
+                    activity_audience_outcome="Announced the architecture, now live with 6 field teams.",
+                    links="https://www.linkedin.com/posts/caldeirav_rag-activity-7234",
+                )
+            ]
+        )
+        # The retry re-creates the same engagement row (same post URL) while
+        # also placing the two genuinely missing items.
+        retry = QuarterReport(
+            section_5_engagements=[
+                EngagementRow(
+                    engagement_event_partner="Duplicate re-placement of the same post",
+                    activity_audience_outcome="Same link as the existing row.",
+                    links="https://www.linkedin.com/posts/caldeirav_rag-activity-7234",
+                )
+            ],
+            section_2_upstream=[
+                UpstreamContributionRow(
+                    project_repo_contribution="Fleet Operator GPU scheduling",
+                    what_you_did_and_why="Merged PR adding topology-aware GPU scheduling.",
+                    links="https://github.com/upstream-project/fleet-operator/pull/42",
+                )
+            ],
+            section_4_customers=[
+                CustomerFieldWorkRow(
+                    customer_segment_opportunity="Acme Corp (Financial Services)",
+                    activity_and_outcome="3-week architecture sprint; technical win.",
+                    links="https://docs.google.com/presentation/d/abc123/edit",
+                )
+            ],
+        )
+        fake_model.scripted = {"QuarterReport": [main, retry]}
+
+        result = await synthesize_report(PROFILE, _sample_items(), fake_model)
+
+        # The duplicate engagement row was dropped; the original remains.
+        assert len(result.report.section_5_engagements) == 1
+        assert result.report.section_5_engagements[0].engagement_event_partner == (
+            "Multi-Cluster RAG Reference Architecture announcement"
+        )
+        # The genuinely new rows (newly cited URLs) were kept.
+        assert len(result.report.section_2_upstream) == 1
+        assert len(result.report.section_4_customers) == 1
         assert result.backfilled_count == 0
-        assert result.report.section_6_custom == []  # no duplicate dump
-        assert result.unplaced_items == ["Acme Corp POC readout"]  # surfaced for verification
 
     async def test_unrepresented_items_backfilled_to_section6(
         self, fake_model: StructuredFakeChatModel
@@ -373,6 +497,39 @@ class TestCompletenessBackstop:
             if "fleet-operator" in row.initiative_activity_name
         ]
         assert github_rows == []
+
+    async def test_uppercase_url_suffixes_count_as_represented(
+        self, fake_model: StructuredFakeChatModel
+    ) -> None:
+        """URL markers must match case-sensitively.
+
+        LinkedIn post URLs end in random case-sensitive suffixes (e.g.
+        ``-RpQB``). Lowercasing the marker made every cited post look
+        unrepresented, duplicating already-placed posts as auto-added rows."""
+        post = ActivityItem(
+            source="linkedin",
+            date=date(2026, 8, 12),
+            title="Following my talk at Agent Substrate Day, the CNCF announcement",
+            summary="Post about the CNCF announcement.",
+            url="https://www.linkedin.com/posts/caldeirav_agent-substrate-day-activity-7526453473077288960-RpQB",
+        )
+        report = QuarterReport(
+            section_5_engagements=[
+                EngagementRow(
+                    engagement_event_partner="Agent Substrate Day CNCF announcement",
+                    activity_audience_outcome="Covered the CNCF announcement and 1.0 milestone.",
+                    links="https://www.linkedin.com/posts/caldeirav_agent-substrate-day-activity-7526453473077288960-RpQB",
+                )
+            ]
+        )
+        fake_model.scripted = {"QuarterReport": [report]}
+
+        result = await synthesize_report(PROFILE, [post], fake_model)
+
+        # The cited URL represents the post: no retry, no backfill, no duplicate.
+        assert len(fake_model.inputs_seen) == 1
+        assert result.backfilled_count == 0
+        assert result.report.section_6_custom == []
 
 
 class TestChunkedSynthesis:

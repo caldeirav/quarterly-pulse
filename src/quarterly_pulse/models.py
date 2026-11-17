@@ -114,6 +114,5 @@ class AuditReport(BaseModel):
     section_row_counts: dict[int, int] = Field(default_factory=dict)
     empty_sections: list[int] = Field(default_factory=list)
     grounding_violations: list[str] = Field(default_factory=list)
-    unplaced_items: list[str] = Field(default_factory=list)
     cache_gathered_at: datetime.datetime | None = None
     generated_at: datetime.datetime = Field(default_factory=lambda: datetime.datetime.now().astimezone())
