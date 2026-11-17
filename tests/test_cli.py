@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -447,6 +448,57 @@ class TestQbrCommand:
         # The config file's leader/org reached the deck (via synthesized content check).
         deck_text = str(result.output)
         assert "2 report(s)" in deck_text
+
+    def test_qbr_interview_answers_flow_into_synthesis(
+        self,
+        tmp_path: Path,
+        qbr_reports_dir: Path,
+        qbr_template_path: Path,
+        monkeypatch,
+    ) -> None:
+        """Interactive path: plan -> prompt -> answer -> synthesize on one loop.
+
+        Regression guard for the 'Event loop is closed' failure: interview
+        planning and synthesis must share a single event loop because the
+        provider SDK's async client binds to the first loop it runs on."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(cli_module, "_stdin_is_interactive", lambda: True)
+        from quarterly_pulse.qbr import InterviewPlan, InterviewQuestion
+        from tests.test_qbr import _content
+
+        fake_model = StructuredFakeChatModel(responses=["unused"])
+        plan = InterviewPlan(
+            context_summary="Two contributors, Q3 2026.",
+            questions=[
+                InterviewQuestion(topic="must-win owner", question="Who owns the Q4 must-win?"),
+                InterviewQuestion(topic="stop-list", question="What do we stop in Q4?"),
+            ],
+        )
+        fake_model.scripted = {"InterviewPlan": [plan], "QbrContent": [_content()]}
+        monkeypatch.setattr(cli_module, "init_chat_model", lambda model_id: fake_model)
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+
+        deck = tmp_path / "interviewed.pptx"
+        result = runner.invoke(
+            app,
+            [
+                "qbr",
+                "--reports-dir", str(qbr_reports_dir),
+                "--pptx", str(qbr_template_path),
+                "--output", str(deck),
+            ],
+            input="Priya owns it\nstop the unsponsored POCs\n",
+        )
+
+        assert result.exit_code == 0, result.output
+        assert deck.is_file()
+        assert "Question 1 of up to 2" in result.output
+        # The answers reached the synthesis prompt.
+        _, synthesis_prompt = fake_model.inputs_seen[-1]
+        human = list(synthesis_prompt.messages)[1].content
+        assert "Priya owns it" in human
+        assert "stop the unsponsored POCs" in human
 
     def test_qbr_requires_reports(self, tmp_path: Path, qbr_template_path: Path, monkeypatch) -> None:
         monkeypatch.chdir(tmp_path)
