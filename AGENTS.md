@@ -40,13 +40,21 @@ This project strictly uses **`uv`** as its package manager and Python environmen
   * `connectors/` — Async GitHub, LinkedIn, and local document extractors returning normalized `ActivityItem` models.
   * `parser.py` — Markdown template parser extracting Section 1 metadata and preserving Sections 2–9 table schemas.
   * `synthesizer.py` — LangChain runnables for deduplicating items, routing them to template sections, and generating concise table entries.
-  * `formatter.py` — Safe Markdown table population and `<details>` audit footer generation.
-  * `cli.py` — Typer CLI entrypoint wired to `[project.scripts]` as `quarterly-pulse`.
+  * `renderer.py` — Safe Markdown table population and `<details>` audit footer generation.
+  * `qbr.py` — QBR Architect core: report aggregation, clarifying-interview planning, four-slide content synthesis (implements `skills/qbr-architect/SKILL.md`).
+  * `qbr_renderer.py` — In-place PPTX slot filling against `skills/qbr-architect/assets/qbr-template.pptx`, speaker notes, and the companion source record.
+  * `cli.py` — Typer CLI entrypoint (`populate` and `qbr` commands) wired to `[project.scripts]` as `quarterly-pulse`.
+* **QBR Architect skill:** The content contract for the `qbr` command lives in `skills/qbr-architect/SKILL.md` with the authoritative PPTX template in `skills/qbr-architect/assets/`. Keep the skill's slot inventory and the renderer's `_SLIDE_SLOTS` map in sync when either changes.
 * **Read Before Writing:** Always inspect `templates/quarterly-template.md` (or the user-provided template) to verify exact headings and column schemas before modifying parser or formatter logic.
 * **Test-Driven:** When adding or updating a connector, parser rule, or LangChain chain, add mock fixtures in `tests/fixtures/` and verify with `uv run pytest`.
 
 ## 5. Execution Context
 
 When running or testing the CLI locally, formulate commands using:
-`uv run quarterly-pulse --template templates/quarterly-template.md --docs-dir ./docs --start-date 2026-07-01`
-(Adjust paths and dates based on the current task context).
+`uv run quarterly-pulse populate --template templates/quarterly-template.md --docs-dir ./docs --start-date 2026-07-01`
+(Adjust paths and dates based on the current task context.)
+
+For the QBR deck, aggregate populated reports from a source directory (with an optional
+`qbr-config.yaml` for leader/org/quarters):
+`uv run quarterly-pulse qbr --reports-dir ./qbr-reports --no-interview`
+(Drop `--no-interview` for the interactive clarifying interview.)

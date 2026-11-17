@@ -1328,6 +1328,7 @@ dependencies = [
     { name = "pypdf" },
     { name = "python-docx" },
     { name = "python-pptx" },
+    { name = "pyyaml" },
     { name = "typer" },
 ]
 
@@ -1351,6 +1352,7 @@ requires-dist = [
     { name = "pypdf", specifier = ">=5.0.0" },
     { name = "python-docx", specifier = ">=1.1.0" },
     { name = "python-pptx", specifier = ">=1.0.2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "typer", specifier = ">=0.12.5" },
 ]
 

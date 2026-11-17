@@ -2,8 +2,16 @@
 
 Kept lean per repository conventions: argument parsing, configuration, and
 orchestration. The pipeline itself lives in :mod:`quarterly_pulse.parser`,
-:mod:`quarterly_pulse.connectors`, :mod:`quarterly_pulse.synthesizer`, and
-:mod:`quarterly_pulse.renderer`.
+:mod:`quarterly_pulse.connectors`, :mod:`quarterly_pulse.synthesizer`,
+:mod:`quarterly_pulse.renderer`, :mod:`quarterly_pulse.qbr`, and
+:mod:`quarterly_pulse.qbr_renderer`.
+
+Commands:
+
+* ``populate`` — populate a quarterly activity log template from GitHub,
+  LinkedIn, and local documents.
+* ``qbr`` — aggregate populated reports into a leader QBR deck following the
+  ``skills/qbr-architect/SKILL.md`` contract.
 
 Behavioral contract:
 
@@ -46,6 +54,16 @@ from quarterly_pulse.models import (
     TemplateProfile,
 )
 from quarterly_pulse.parser import parse_template
+from quarterly_pulse.qbr import (
+    INTERVIEW_BUDGET,
+    QbrConfig,
+    load_team_reports,
+    plan_interview,
+    resolve_deck_config,
+    source_manifest,
+    synthesize_qbr,
+)
+from quarterly_pulse.qbr_renderer import default_output_path, render_qbr_deck
 from quarterly_pulse.renderer import SECTION_FIELDS, render_report
 from quarterly_pulse.synthesizer import SynthesisResult, synthesize_report
 
@@ -229,6 +247,200 @@ def populate(
         f"({synthesis.items_received} items gathered, {synthesis.items_after_dedup} after dedup, "
         f"{len(synthesis.grounding_violations)} ungrounded URLs removed)."
     )
+
+
+# ---------------------------------------------------------------------------
+# qbr-architect: aggregate populated reports into a leader QBR deck
+# ---------------------------------------------------------------------------
+
+ReportsDirOption = Annotated[
+    Path,
+    typer.Option(
+        "--reports-dir",
+        help=(
+            "Directory of populated quarterly reports (*.md) to aggregate, "
+            "plus an optional qbr-config.yaml with leader/org/quarters."
+        ),
+        exists=True,
+        file_okay=False,
+        readable=True,
+        show_default=False,
+    ),
+]
+
+PptxOption = Annotated[
+    Optional[Path],
+    typer.Option(
+        "--pptx",
+        help="QBR PPTX template (default: skills/qbr-architect/assets/qbr-template.pptx).",
+    ),
+]
+
+QbrOutputOption = Annotated[
+    Optional[Path],
+    typer.Option(
+        "--output",
+        help="Output .pptx path (default: <org>_<review-quarter>_QBR.pptx in the current directory).",
+    ),
+]
+
+LeaderOption = Annotated[
+    Optional[str],
+    typer.Option("--leader", help="Override the leader name from qbr-config.yaml."),
+]
+
+OrgOption = Annotated[
+    Optional[str],
+    typer.Option("--org", help="Override the organization/team from qbr-config.yaml."),
+]
+
+ReviewQuarterOption = Annotated[
+    Optional[str],
+    typer.Option("--review-quarter", help="Review quarter label, e.g. 'Q3 2026'."),
+]
+
+PreviewQuarterOption = Annotated[
+    Optional[str],
+    typer.Option("--preview-quarter", help="Preview quarter label, e.g. 'Q4 2026'."),
+]
+
+NoInterviewOption = Annotated[
+    bool,
+    typer.Option(
+        "--no-interview",
+        help="Skip the clarifying interview and draft directly with gaps noted.",
+    ),
+]
+
+_DEFAULT_TEMPLATE = Path("skills/qbr-architect/assets/qbr-template.pptx")
+
+
+@app.command()
+def qbr(
+    reports_dir: ReportsDirOption,
+    pptx: PptxOption = None,
+    output: QbrOutputOption = None,
+    model: ModelOption = None,
+    leader: LeaderOption = None,
+    org: OrgOption = None,
+    review_quarter: ReviewQuarterOption = None,
+    preview_quarter: PreviewQuarterOption = None,
+    no_interview: NoInterviewOption = False,
+) -> None:
+    """Aggregate populated quarterly reports into a leader QBR deck (qbr-architect skill)."""
+    _configure_logging()
+    settings = Settings()
+    model_id = model or settings.llm_model
+
+    template_path = pptx or _DEFAULT_TEMPLATE
+    if not template_path.is_file():
+        typer.secho(
+            f"QBR template not found at {template_path}; pass --pptx with the path to "
+            "the qbr-template.pptx you want to fill.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    reports = load_team_reports(reports_dir)
+    if not reports:
+        typer.secho(
+            f"No Markdown reports found in {reports_dir}; populate quarterly reports first "
+            "(quarterly-pulse populate) and point --reports-dir at them.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        config = resolve_deck_config(
+            reports,
+            QbrConfig.load(reports_dir),
+            leader=leader,
+            org=org,
+            review_quarter=review_quarter,
+            preview_quarter=preview_quarter,
+        )
+    except ValueError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+    typer.secho(
+        f"QBR: {len(reports)} report(s) | leader: {config.leader or 'Leader to confirm'} | "
+        f"org: {config.org or 'Team to confirm'} | review: {config.review_quarter} | "
+        f"preview: {config.preview_quarter}",
+        err=True,
+    )
+
+    chat_model = _init_model(model_id, settings)
+
+    answers: list[dict[str, str]] = []
+    if no_interview:
+        typer.secho("Interview skipped (--no-interview); drafting with gaps noted.", err=True)
+    elif sys.stdin.isatty():
+        answers = _run_interview(config, reports, chat_model)
+    else:
+        typer.secho(
+            "stdin is not interactive; skipping the interview (use --no-interview to silence).",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
+
+    try:
+        synthesis = asyncio.run(synthesize_qbr(config, reports, answers, chat_model))
+    except Exception as exc:  # fail loudly: no partial output on LLM failure
+        typer.secho(f"QBR synthesis with '{model_id}' failed: {exc}", err=True, fg=typer.colors.RED)
+        typer.secho(
+            "Check your provider API key (OPENAI_API_KEY / ANTHROPIC_API_KEY) and LLM_MODEL, then re-run.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    output_path = output or default_output_path(config, Path.cwd())
+    outputs = render_qbr_deck(template_path, synthesis, config, source_manifest(reports), output_path)
+    for warning in outputs.warnings:
+        typer.secho(f"[qbr] warning: {warning}", err=True, fg=typer.colors.YELLOW)
+
+    typer.echo(
+        f"Wrote {outputs.deck} and {outputs.companion.name} "
+        f"({synthesis.rows_received} source rows, {synthesis.rows_for_synthesis} synthesized, "
+        f"{len(synthesis.content.gaps)} gaps recorded)."
+    )
+
+
+def _run_interview(
+    config: QbrConfig, reports: list, chat_model: BaseChatModel
+) -> list[dict[str, str]]:
+    """Sequential clarifying interview per the SKILL.md contract (max 10)."""
+    answers: list[dict[str, str]] = []
+    while True:
+        plan = asyncio.run(plan_interview(config, reports, chat_model, answers))
+        typer.secho(f"\n{plan.context_summary}", err=True)
+        if not plan.questions:
+            typer.secho("No clarifying questions needed — generating the draft.", err=True)
+            return answers
+        total = len(plan.questions)
+        typer.secho(
+            f"I have {total} question(s). Answer plainly, or with 'unknown' / 'skip'; "
+            "say 'draft' to stop and generate now.\n",
+            err=True,
+        )
+        stopped = False
+        for index, question in enumerate(plan.questions, 1):
+            answer = typer.prompt(f"Question {index} of up to {total}: {question.question}")
+            if answer.strip().lower() in {"draft", "draft now", "stop"}:
+                stopped = True
+                break
+            answers.append({"question": question.question, "answer": answer.strip()})
+        if stopped or total < INTERVIEW_BUDGET:
+            return answers
+        continue_interview = typer.prompt(
+            "Continue with more questions, or produce the draft now with the remaining "
+            "gaps noted? (more/draft)"
+        )
+        if continue_interview.strip().lower() != "more":
+            return answers
 
 
 # ---------------------------------------------------------------------------
