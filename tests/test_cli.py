@@ -98,6 +98,7 @@ class TestEndToEndOffline:
         result = runner.invoke(
             app,
             [
+                "populate",
                 "--template", str(template_path),
                 "--docs-dir", str(docs_dir),
                 "--start-date", "2026-08-01",
@@ -138,6 +139,7 @@ class TestEndToEndOffline:
         result = runner.invoke(
             app,
             [
+                "populate",
                 "--template", str(template_path),
                 "--docs-dir", str(docs_dir),
                 "--start-date", "2026-08-01",
@@ -180,6 +182,7 @@ class TestEndToEndOffline:
         result = runner.invoke(
             app,
             [
+                "populate",
                 "--template", str(template_path),
                 "--docs-dir", str(docs_dir),
                 "--start-date", "2026-08-01",
@@ -206,6 +209,7 @@ class TestFailLoudly:
         result = runner.invoke(
             app,
             [
+                "populate",
                 "--template", str(template_path),
                 "--docs-dir", str(docs_dir),
                 "--start-date", "2026-08-01",
@@ -226,6 +230,7 @@ class TestFailLoudly:
         result = runner.invoke(
             app,
             [
+                "populate",
                 "--template", str(template_path),
                 "--docs-dir", str(docs_dir),
                 "--start-date", "2026-09-30",
@@ -270,7 +275,7 @@ class TestCaching:
         monkeypatch.setattr(cli_module, "init_chat_model", lambda model_id: fake_model)
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.delenv("LLM_MODEL", raising=False)
-        return runner.invoke(app, runner_args)
+        return runner.invoke(app, ["populate", *runner_args])
 
     def test_cache_roundtrip_skips_connectors(
         self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
@@ -401,3 +406,99 @@ class TestCaching:
         assert second.exit_code == 0, second.output
         assert calls["github"] == 1  # connectors re-ran despite the cache
         assert "wrote" in second.output  # cache overwritten
+
+
+class TestQbrCommand:
+    def _invoke_qbr(self, args: list[str], monkeypatch, content) -> object:
+        fake_model = StructuredFakeChatModel(responses=["unused"])
+        fake_model.scripted = {"QbrContent": [content]}
+        monkeypatch.setattr(cli_module, "init_chat_model", lambda model_id: fake_model)
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        return runner.invoke(app, ["qbr", *args])
+
+    def test_qbr_writes_deck_and_companion(
+        self,
+        tmp_path: Path,
+        qbr_reports_dir: Path,
+        qbr_template_path: Path,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)  # keep the developer's real .env out of Settings()
+        from tests.test_qbr import _content
+
+        deck = tmp_path / "team-deck.pptx"
+        result = self._invoke_qbr(
+            [
+                "--reports-dir", str(qbr_reports_dir),
+                "--pptx", str(qbr_template_path),
+                "--output", str(deck),
+                "--no-interview",
+            ],
+            monkeypatch,
+            _content(),
+        )
+
+        assert result.exit_code == 0, result.output
+        assert deck.is_file()
+        companion = tmp_path / "team-deck_sources.md"
+        assert companion.is_file()
+        assert "source rows" in result.output
+        # The config file's leader/org reached the deck (via synthesized content check).
+        deck_text = str(result.output)
+        assert "2 report(s)" in deck_text
+
+    def test_qbr_requires_reports(self, tmp_path: Path, qbr_template_path: Path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        result = self._invoke_qbr(
+            [
+                "--reports-dir", str(empty),
+                "--pptx", str(qbr_template_path),
+                "--no-interview",
+            ],
+            monkeypatch,
+            None,
+        )
+        assert result.exit_code == 2
+        assert "No Markdown reports" in result.output
+
+    def test_qbr_requires_template(self, tmp_path: Path, qbr_reports_dir: Path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        result = self._invoke_qbr(
+            [
+                "--reports-dir", str(qbr_reports_dir),
+                "--pptx", str(tmp_path / "missing.pptx"),
+                "--no-interview",
+            ],
+            monkeypatch,
+            None,
+        )
+        assert result.exit_code == 2
+        assert "QBR template not found" in result.output
+
+    def test_qbr_missing_review_quarter_exits(
+        self, tmp_path: Path, qbr_template_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        # Reports without Section 1 quarters and no config: nothing to derive from.
+        bare = tmp_path / "bare"
+        bare.mkdir()
+        (bare / "one.md").write_text(
+            "# Log\n\n## 2\\. Open Source & Upstream Contributions\n\n"
+            "| A | B | C |\n| :---- | :---- | :---- |\n"
+            "| repo | merged a PR | link |\n",
+            encoding="utf-8",
+        )
+        result = self._invoke_qbr(
+            [
+                "--reports-dir", str(bare),
+                "--pptx", str(qbr_template_path),
+                "--no-interview",
+            ],
+            monkeypatch,
+            None,
+        )
+        assert result.exit_code == 2
+        assert "review quarter" in result.output

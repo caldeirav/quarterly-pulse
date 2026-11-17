@@ -72,6 +72,18 @@ def template_path() -> Path:
 
 
 @pytest.fixture()
+def qbr_template_path() -> Path:
+    """Path to the authoritative QBR PPTX template in the skill bundle."""
+    return REPO_ROOT / "skills" / "qbr-architect" / "assets" / "qbr-template.pptx"
+
+
+@pytest.fixture()
+def qbr_reports_dir() -> Path:
+    """Source directory with two populated reports and a qbr-config.yaml."""
+    return FIXTURES_DIR / "qbr"
+
+
+@pytest.fixture()
 def template_text(template_path: Path) -> str:
     """Raw text of the canonical quarterly template."""
     return template_path.read_text(encoding="utf-8")

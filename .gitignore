@@ -224,3 +224,8 @@ __marimo__/
 
 # MLflow default artifact directory (accidental local runs)
 mlruns/
+
+# QBR Architect: scratch input directory and generated decks
+qbr-reports/
+*_QBR.pptx
+*_QBR_sources.md

@@ -62,8 +62,11 @@ cp .env.example .env   # then fill in your keys
 
 ## Usage
 
+Two commands: `populate` fills a quarterly activity log; `qbr` builds a
+leader QBR deck from populated reports.
+
 ```bash
-uv run quarterly-pulse \
+uv run quarterly-pulse populate \
   --template templates/quarterly-template.md \
   --docs-dir ./docs \
   --start-date 2026-07-01
@@ -108,6 +111,48 @@ source, the reporting window, and the contributor profile, so the audit footer
 stays accurate for cached runs (it notes the gather timestamp). If the
 requested window or handles differ from the cached gather, the CLI warns and
 suggests `--refresh`.
+
+## QBR Architect: leader deck from populated reports
+
+`quarterly-pulse qbr` implements the
+[`skills/qbr-architect/SKILL.md`](skills/qbr-architect/SKILL.md) contract: it
+aggregates every populated quarterly report (`*.md`) in a source directory
+into an editable four-slide executive QBR deck — Executive Readout, Execution
+Deep-Dive, Looking Ahead, and Executive Escalations & Radar — filled in place
+into `skills/qbr-architect/assets/qbr-template.pptx`. Slot text is replaced
+run-by-run, so bold titles, regular details, and the lowlights' red
+`Mitigation:` runs keep the template's fonts and colors.
+
+```bash
+uv run quarterly-pulse qbr --reports-dir ./qbr-reports
+```
+
+| Flag | Required | Description |
+| :--- | :--- | :--- |
+| `--reports-dir` | yes | Directory of populated reports (`*.md`), plus an optional `qbr-config.yaml`. |
+| `--pptx` | no | QBR PPTX template; defaults to `skills/qbr-architect/assets/qbr-template.pptx`. |
+| `--output` | no | Output `.pptx`; defaults to `<org>_<review-quarter>_QBR.pptx`. |
+| `--model` | no | LangChain model override; defaults to `LLM_MODEL`. |
+| `--leader` / `--org` | no | Override the leader / organization from `qbr-config.yaml`. |
+| `--review-quarter` / `--preview-quarter` | no | Quarter labels (e.g. `Q3 2026`); preview rolls over from review (Q4 → Q1). |
+| `--no-interview` | no | Skip the clarifying interview and draft with gaps noted. |
+
+Deck metadata comes from a `qbr-config.yaml` beside the reports (leader, org,
+review/preview quarters); flags override, and the review quarter falls back to
+the reports' Section 1 consensus when every report agrees. Nothing is inferred
+from filenames or today's date.
+
+**Clarifying interview.** By default the CLI plans up to 10 prioritized
+questions from the gaps the reports leave against the four-slide contract and
+asks them one at a time (`unknown`, `skip`, and `draft` are valid answers;
+after 10 it offers continue-or-draft). `--no-interview` drafts directly, and a
+non-interactive stdin skips the interview with a warning.
+
+**Grounding.** The LLM cites source row IDs, never URLs; the renderer resolves
+those IDs into locators from the parsed reports, so slide links cannot be
+fabricated. Speaker notes carry source locators, objective/KR mappings, stop
+linkages, and contributor attribution; a companion `<deck>_sources.md` record
+lists unresolved gaps by slide.
 
 ## Configuration
 
@@ -213,12 +258,14 @@ runtime.
 
 ```
 src/quarterly_pulse/
-├── cli.py           # Typer entrypoint: flags, wiring, fail-loudly LLM setup
+├── cli.py           # Typer entrypoint: populate + qbr commands, fail-loudly LLM setup
 ├── config.py        # pydantic-settings (env / .env)
 ├── models.py        # ActivityItem, ConnectorResult, TemplateProfile, audit schemas
 ├── parser.py        # Section 1 extraction; Sections 2-9 schema capture
 ├── synthesizer.py   # LangChain LCEL chains, QuarterReport, dedup, coverage retry, grounding
 ├── renderer.py      # template-preserving table population, audit footer
+├── qbr.py           # QBR Architect core: aggregation, interview planning, QbrContent synthesis
+├── qbr_renderer.py  # in-place PPTX slot filling, speaker notes, companion record
 └── connectors/
     ├── github.py    # GraphQL contributionsCollection + Search API + gh CLI
     ├── linkedin.py  # prioritized fallback chain
