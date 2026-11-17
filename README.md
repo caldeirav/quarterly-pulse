@@ -28,7 +28,7 @@ template (.md) ──► parser ──► contributor profile + section schemas 
                                    ▼
                     LangChain synthesizer (LCEL, structured output,
                     deterministic dedup, chunked abatch for long quarters,
-                    URL-grounding guardrail)
+                    completeness retry pass, URL-grounding guardrail)
                                    ▼
                     renderer (template-preserving tables, pipe escaping,
                     <details> audit footer) ──► <template>_populated.md
@@ -40,9 +40,14 @@ template (.md) ──► parser ──► contributor profile + section schemas 
 - **Fail loudly on the LLM**: synthesis is the one hard dependency. Without a
   provider API key (or on a synthesis failure) the CLI exits non-zero with an
   actionable message and writes no partial output.
+- **Nothing gathered gets dropped**: a deterministic coverage check verifies
+  that every item's URLs, document path, repository, or title appear in the
+  draft; left-out records get a model retry pass judged against the draft and,
+  only if that fails, a Section 6 backstop row marked for manual re-placement.
 - **Grounding safety**: every URL in the generated rows is validated against
-  the retrieved source items; anything ungrounded is stripped and reported.
-  Pipes in cell text are escaped so tables always render.
+  the retrieved source items (prefix-tolerant, so long links the model
+  slightly truncated still count as grounded); anything ungrounded is stripped
+  and reported. Pipes in cell text are escaped so tables always render.
 
 ## Install
 
@@ -130,6 +135,47 @@ All configuration is environment-driven (process env or `.env`):
 4. **Graceful degradation** — a warning explaining exactly which env var or
    export file to add; the run continues.
 
+## Synthesis: completeness and routing rules
+
+The synthesizer's contract is that **every gathered item lands in the
+report**:
+
+1. **First pass** — all records go to the model in one structured-output call
+   (chunked pre-summarization first when the quarter exceeds the context
+   budget).
+2. **Coverage check** — a deterministic pass looks for each item's
+   identifying markers (URLs, document path, repository name, title) in the
+   generated rows.
+3. **Retry pass** — left-out records are re-sent to the model together with
+   the draft. Coverage is judged strictly per item: a record counts as
+   covered only when a row cites the same link or is literally the same item
+   (same post URL, same document, same repository) — two posts about the same
+   event are still two rows. Items the retry judges already covered are
+   listed in the audit footer as not separately placed, never duplicated as
+   extra rows.
+4. **Backstop** — only when the retry pass itself fails are the remaining
+   items appended to Section 6 as `auto-added` rows for manual re-placement.
+
+The model follows — and the connectors pre-tag records for — these routing
+and row-quality rules:
+
+- GitHub activity arrives aggregated **one item per repository**, with the
+  repo description and the individual PR/issue URLs kept for citation; the
+  report renders one row per repo, leading with what the repo is and what the
+  contributor did there.
+- **Every LinkedIn post and every local document becomes its own row.** Posts
+  that announce, follow, or recap an event (keyword-tagged by the connector)
+  route to Section 5, or Section 4 when the event is customer-specific —
+  never to the Section 6 catch-all. Posts sharing attached slides, articles,
+  or documents are never merged into other rows.
+- Event series (a summit touring several cities, repeated briefings) produce
+  **one row per event or location**.
+- Exported emails in the docs directory are detected by their headers and
+  correlated with the events they concern instead of being listed one by one.
+- Row titles are concise contributor-POV names of the activity; the
+  activity/outcome cell is a 2-3 sentence external assessment of what was
+  accomplished and why it matters, not a clipped quote of the source text.
+
 ## Output guarantees
 
 - Section 1 and the section headings, helper prompts, and table column
@@ -142,8 +188,9 @@ All configuration is environment-driven (process env or `.env`):
 - Sections 8/9 contain LLM-proposed recommendations for next quarter and for
   help needed, derived from the gathered activity, for manual editing.
 - A collapsible `<details>` audit footer records sources queried, strategies
-  used, item counts, deduplication stats, the model, empty sections, and any
-  fallback warnings or grounding fixes.
+  used, item counts, deduplication stats, the model, per-section row counts,
+  empty sections, items the retry pass judged already covered, backstop and
+  cache details, and any fallback warnings or grounding fixes.
 
 ## Development
 
@@ -165,7 +212,7 @@ src/quarterly_pulse/
 ├── config.py        # pydantic-settings (env / .env)
 ├── models.py        # ActivityItem, ConnectorResult, TemplateProfile, audit schemas
 ├── parser.py        # Section 1 extraction; Sections 2-9 schema capture
-├── synthesizer.py   # LangChain LCEL chains, QuarterReport, dedup, grounding
+├── synthesizer.py   # LangChain LCEL chains, QuarterReport, dedup, coverage retry, grounding
 ├── renderer.py      # template-preserving table population, audit footer
 └── connectors/
     ├── github.py    # GraphQL contributionsCollection + Search API + gh CLI
