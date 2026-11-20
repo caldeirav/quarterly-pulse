@@ -34,7 +34,7 @@ from langchain_core.runnables import Runnable
 from pydantic import BaseModel, Field
 
 from quarterly_pulse.models import TemplateProfile
-from quarterly_pulse.parser import parse_template
+from quarterly_pulse.parser import parse_template, split_table_row, unescape_markdown
 
 #: Character budgets guarding the model context window (mirrors synthesizer).
 _CONTEXT_CHAR_BUDGET = 150_000
@@ -174,7 +174,7 @@ def load_team_reports(reports_dir: Path) -> list[TeamReport]:
         if path.name.startswith("."):
             continue
         parsed = parse_template(path)
-        contributor = (parsed.profile.name_role or path.stem).split(",")[0].strip()
+        contributor = _contributor_name(parsed.profile, path.stem)
         rows: list[ReportRow] = []
         for section in parsed.sections:
             for index, line in enumerate(section.body_rows):
@@ -191,22 +191,51 @@ def load_team_reports(reports_dir: Path) -> list[TeamReport]:
                         columns=section.columns,
                         title=padded[0].strip(),
                         detail=padded[1].strip(),
-                        links=padded[2].strip(),
+                        links=_unwrap_markdown_links(padded[2]),
                     )
                 )
         reports.append(TeamReport(path=path, profile=parsed.profile, rows=rows))
     return reports
 
 
+def _contributor_name(profile: TemplateProfile, fallback: str) -> str:
+    """A clean display name for attribution.
+
+    Contributors fill Section 1 in different editors: names arrive as
+    ``*Andreas Spanner - Senior Principal Chief Architect*`` or
+    ``Vincent Caldeira, CTO APAC``. Strip markdown emphasis and drop the
+    role suffix so speaker-notes attribution stays readable.
+    """
+    name = re.sub(r"[*_`]+", "", profile.name_role or "").strip()
+    for separator in (",", " - ", " — "):
+        if separator in name:
+            name = name.split(separator, 1)[0].strip()
+            break
+    return name or fallback
+
+
+_MD_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)\s]+)\)")
+
+
 def _split_row(line: str) -> list[str] | None:
-    """Split a Markdown table row into cells; None for non-row lines."""
+    """Split a Markdown table row into cells; None for non-row lines.
+
+    Splits on unescaped pipes (reusing the template parser's row splitter),
+    then clears markdown escapes (``https\\://``, ``\\-``, ``\\|``) so
+    titles, details, and link locators read cleanly downstream.
+    """
     stripped = line.strip()
     if not stripped.startswith("|"):
         return None
-    parts = stripped.strip("|").split("|")
-    if len(parts) < 2:
+    cells = split_table_row(stripped)
+    if len(cells) < 2:
         return None
-    return [part.replace("\\|", "|").strip() for part in parts]
+    return [unescape_markdown(cell).strip() for cell in cells]
+
+
+def _unwrap_markdown_links(cell: str) -> str:
+    """Reduce ``[text](url)`` markdown links to their bare URLs."""
+    return _MD_LINK_RE.sub(r"\2", cell).strip()
 
 
 def _is_placeholder(cells: list[str]) -> bool:
@@ -528,7 +557,7 @@ async def synthesize_qbr(
         }
     )
 
-    warnings = _validate_row_citations(content, source_manifest(reports))
+    warnings = validate_row_citations(content, source_manifest(reports))
     return QbrSynthesisResult(
         content=content,
         rows_received=len(rows),
@@ -538,7 +567,7 @@ async def synthesize_qbr(
     )
 
 
-def _validate_row_citations(
+def validate_row_citations(
     content: QbrContent, manifest: dict[str, ReportRow]
 ) -> list[str]:
     """Flag slots citing row_ids that do not exist in the source manifest."""

@@ -26,6 +26,7 @@ Behavioral contract:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -57,11 +58,14 @@ from quarterly_pulse.parser import parse_template
 from quarterly_pulse.qbr import (
     INTERVIEW_BUDGET,
     QbrConfig,
+    QbrContent,
+    QbrSynthesisResult,
     load_team_reports,
     plan_interview,
     resolve_deck_config,
     source_manifest,
     synthesize_qbr,
+    validate_row_citations,
 )
 from quarterly_pulse.qbr_renderer import default_output_path, render_qbr_deck
 from quarterly_pulse.renderer import SECTION_FIELDS, render_report
@@ -78,6 +82,17 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+
+qbr_app = typer.Typer(
+    name="qbr",
+    help=(
+        "QBR Architect: aggregate populated reports into a leader QBR deck "
+        "(skills/qbr-architect/SKILL.md contract). 'make' runs the whole "
+        "pipeline; 'rows', 'render', and 'schema' are the agent-driven steps."
+    ),
+    no_args_is_help=True,
+)
+app.add_typer(qbr_app)
 
 TemplateOption = Annotated[
     Path,
@@ -199,7 +214,7 @@ def populate(
 
     settings = Settings()
     model_id = model or settings.llm_model
-    output_path = output or Path(f"{template.stem}_populated.md")
+    output_path = output or Path("out") / f"{template.stem}_populated.md"
 
     parsed = parse_template(template)
     profile = _apply_overrides(parsed.profile, github=github, linkedin=linkedin)
@@ -240,6 +255,7 @@ def populate(
 
     audit = _build_audit(connector_results, synthesis, model_id, cache_gathered_at=cache_loaded.gathered_at if cache_loaded else None)
     rendered = render_report(parsed, synthesis.report, audit)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding="utf-8")
 
     typer.echo(
@@ -315,8 +331,8 @@ NoInterviewOption = Annotated[
 _DEFAULT_TEMPLATE = Path("skills/qbr-architect/assets/qbr-template.pptx")
 
 
-@app.command()
-def qbr(
+@qbr_app.command()
+def make(
     reports_dir: ReportsDirOption,
     pptx: PptxOption = None,
     output: QbrOutputOption = None,
@@ -327,7 +343,7 @@ def qbr(
     preview_quarter: PreviewQuarterOption = None,
     no_interview: NoInterviewOption = False,
 ) -> None:
-    """Aggregate populated quarterly reports into a leader QBR deck (qbr-architect skill)."""
+    """Run the whole QBR pipeline: interview (LLM), synthesize, and render."""
     _configure_logging()
     settings = Settings()
     model_id = model or settings.llm_model
@@ -418,6 +434,157 @@ def qbr(
         f"({synthesis.rows_received} source rows, {synthesis.rows_for_synthesis} synthesized, "
         f"{len(synthesis.content.gaps)} gaps recorded)."
     )
+
+
+@qbr_app.command()
+def rows(
+    reports_dir: ReportsDirOption,
+    leader: LeaderOption = None,
+    org: OrgOption = None,
+    review_quarter: ReviewQuarterOption = None,
+    preview_quarter: PreviewQuarterOption = None,
+    output: QbrOutputOption = None,
+) -> None:
+    """Emit the aggregated row inventory and resolved deck config as JSON.
+
+    The agent-driven half of the qbr-architect skill: read this, run the
+    clarifying interview, then write a qbr-content.json citing row_ids.
+    """
+    _configure_logging()
+    reports = load_team_reports(reports_dir)
+    if not reports:
+        typer.secho(
+            f"No Markdown reports found in {reports_dir}.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+    try:
+        config = resolve_deck_config(
+            reports,
+            QbrConfig.load(reports_dir),
+            leader=leader,
+            org=org,
+            review_quarter=review_quarter,
+            preview_quarter=preview_quarter,
+        )
+    except ValueError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+    payload = {
+        "config": config.model_dump(),
+        "rows": [row.model_dump() for report in reports for row in report.rows],
+    }
+    text = json.dumps(payload, ensure_ascii=False, indent=1)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text + "\n", encoding="utf-8")
+        typer.echo(f"Wrote {output} ({len(payload['rows'])} rows).")
+    else:
+        typer.echo(text)
+
+
+@qbr_app.command()
+def render(
+    content: Annotated[
+        Path,
+        typer.Option(
+            "--content",
+            help="qbr-content.json conforming to the QbrContent schema (see `qbr schema`).",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            show_default=False,
+        ),
+    ],
+    reports_dir: ReportsDirOption,
+    pptx: PptxOption = None,
+    output: QbrOutputOption = None,
+    leader: LeaderOption = None,
+    org: OrgOption = None,
+    review_quarter: ReviewQuarterOption = None,
+    preview_quarter: PreviewQuarterOption = None,
+) -> None:
+    """Fill the QBR template from a validated qbr-content.json (no LLM)."""
+    _configure_logging()
+    template_path = pptx or _DEFAULT_TEMPLATE
+    if not template_path.is_file():
+        typer.secho(
+            f"QBR template not found at {template_path}; pass --pptx with the path to "
+            "the qbr-template.pptx you want to fill.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        qbr_content = QbrContent.model_validate_json(content.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        typer.secho(
+            f"{content} is not a valid QbrContent document: {exc}",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        typer.secho(
+            "Run `quarterly-pulse qbr schema` for the expected shape and fix the JSON, "
+            "then re-run.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2) from exc
+
+    reports = load_team_reports(reports_dir)
+    if not reports:
+        typer.secho(
+            f"No Markdown reports found in {reports_dir}; the manifest is needed to "
+            "validate source_row_ids and resolve locators.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+    try:
+        config = resolve_deck_config(
+            reports,
+            QbrConfig.load(reports_dir),
+            leader=leader,
+            org=org,
+            review_quarter=review_quarter,
+            preview_quarter=preview_quarter,
+        )
+    except ValueError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+    manifest = source_manifest(reports)
+    row_count = len(manifest)
+    result = QbrSynthesisResult(
+        content=qbr_content,
+        rows_received=row_count,
+        rows_for_synthesis=row_count,
+        grounding_warnings=validate_row_citations(qbr_content, manifest),
+    )
+    output_path = output or default_output_path(config, Path.cwd())
+    outputs = render_qbr_deck(template_path, result, config, manifest, output_path)
+    for warning in outputs.warnings:
+        typer.secho(f"[qbr] warning: {warning}", err=True, fg=typer.colors.YELLOW)
+
+    typer.echo(
+        f"Wrote {outputs.deck} and {outputs.companion.name} "
+        f"({row_count} source rows, {len(qbr_content.gaps)} gaps recorded)."
+    )
+    if result.grounding_warnings:
+        typer.secho(
+            "Fix the unknown source_row_ids in the content JSON and re-render.",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
+
+
+@qbr_app.command()
+def schema() -> None:
+    """Emit the JSON Schema for qbr-content.json (the render handoff contract)."""
+    typer.echo(json.dumps(QbrContent.model_json_schema(), indent=2))
 
 
 def _stdin_is_interactive() -> bool:

@@ -167,3 +167,38 @@ class TestSyntheticTemplates:
         parsed = parse_template_text("# Just a title\n\nSome prose.\n")
         assert parsed.sections == []
         assert parsed.profile.name_role is None
+
+    def test_bold_wrapped_headings_and_tableless_section(self) -> None:
+        """Variant reports from other editors wrap headings in ``**`` and may
+        leave a section as heading + prose with no table at all."""
+        text = (
+            "# Quarterly Input\n\n"
+            "## **1\\. Contributor Profile & Quarter Context**\n\n"
+            "| Field | Your Input |\n| :---- | :---- |\n"
+            "| Name & Role | Carol Diaz \\- Principal Architect |\n"
+            "| Team / GEO | Field CTO Team APAC |\n\n"
+            "## **2\\. Open Source & Upstream Contributions**\n\n"
+            "| A | B | C |\n| :---- | :---- | :---- |\n"
+            "| repo | merged a PR | link |\n\n"
+            "## **5\\. Executive, Partner & Industry Engagements**\n\n"
+            "No external engagements this quarter.\n\n"
+            "## **6\\. Custom Workstream 1**\n\n"
+            "| A | B | C |\n| :---- | :---- | :---- |\n"
+            "| initiative | outcome | link |\n"
+        )
+        parsed = parse_template_text(text)
+
+        # Bold-wrapped headings parse: profile fields and numbered sections.
+        assert parsed.profile.name_role == "Carol Diaz - Principal Architect"
+        assert parsed.profile.team_geo == "Field CTO Team APAC"
+        assert [section.number for section in parsed.sections] == [2, 5, 6]
+        section2 = parsed.get_section(2)
+        assert section2 is not None
+        assert section2.title == "Open Source & Upstream Contributions"
+        assert len(section2.body_rows) == 1
+
+        # A section without a table becomes an empty spec, never a crash.
+        section5 = parsed.get_section(5)
+        assert section5 is not None
+        assert section5.header_row == ""
+        assert section5.body_rows == []

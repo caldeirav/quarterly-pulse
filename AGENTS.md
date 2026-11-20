@@ -46,6 +46,7 @@ This project strictly uses **`uv`** as its package manager and Python environmen
   * `cli.py` — Typer CLI entrypoint (`populate` and `qbr` commands) wired to `[project.scripts]` as `quarterly-pulse`.
 * **QBR Architect skill:** The content contract for the `qbr` command lives in `skills/qbr-architect/SKILL.md` with the authoritative PPTX template in `skills/qbr-architect/assets/`. Keep the skill's slot inventory and the renderer's `_SLIDE_SLOTS` map in sync when either changes.
 * **Read Before Writing:** Always inspect `templates/quarterly-template.md` (or the user-provided template) to verify exact headings and column schemas before modifying parser or formatter logic.
+* **Operational Files Stay Out of Git:** `docs/` (populate inputs), `out/` (generated reports, caches, QBR decks, `qbr-content.json`), and `qbr-reports/` (QBR inputs) are gitignored working directories. Never commit them, and default any new artifact path into `out/`.
 * **Test-Driven:** When adding or updating a connector, parser rule, or LangChain chain, add mock fixtures in `tests/fixtures/` and verify with `uv run pytest`.
 
 ## 5. Execution Context
@@ -56,5 +57,8 @@ When running or testing the CLI locally, formulate commands using:
 
 For the QBR deck, aggregate populated reports from a source directory (with an optional
 `qbr-config.yaml` for leader/org/quarters):
-`uv run quarterly-pulse qbr --reports-dir ./qbr-reports --no-interview`
+`uv run quarterly-pulse qbr make --reports-dir ./qbr-reports --no-interview`
 (Drop `--no-interview` for the interactive clarifying interview.)
+Agent-driven steps (no LLM key needed): `qbr rows` emits the row inventory and resolved
+config as JSON, `qbr render` fills the deck from a validated `qbr-content.json`, and
+`qbr schema` documents that JSON — see `skills/qbr-architect/SKILL.md`.

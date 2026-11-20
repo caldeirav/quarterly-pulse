@@ -97,10 +97,10 @@ def render_qbr_deck(
 
 
 def default_output_path(config: QbrConfig, cwd: Path) -> Path:
-    """``<org-slug>_<review-quarter>_QBR.pptx`` named from confirmed metadata."""
+    """``out/<org-slug>_<review-quarter>_QBR.pptx`` named from confirmed metadata."""
     org = _slug(config.org or "team")
     quarter = _slug_preserving_case(config.review_quarter or "quarter")
-    return cwd / f"{org}_{quarter}_QBR.pptx"
+    return cwd / "out" / f"{org}_{quarter}_QBR.pptx"
 
 
 def _companion_path(deck_path: Path) -> Path:

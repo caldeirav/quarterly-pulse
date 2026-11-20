@@ -226,4 +226,4 @@ class TestDefaultOutputPath:
     def test_named_from_org_and_quarter(self, tmp_path: Path) -> None:
         config = QbrConfig(org="Field CTO Team APAC", review_quarter="Q3 2026")
         path = default_output_path(config, tmp_path)
-        assert path == tmp_path / "field-cto-team-apac_Q3-2026_QBR.pptx"
+        assert path == tmp_path / "out" / "field-cto-team-apac_Q3-2026_QBR.pptx"
