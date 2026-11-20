@@ -16,7 +16,10 @@ from pathlib import Path
 from quarterly_pulse.models import ParsedTemplate, SectionSpec, TemplateProfile
 
 #: Matches ``## N\. Title`` headings, tolerating the escaped dot (``## 2\.``).
-SECTION_HEADING_RE = re.compile(r"^##\s+(\d)\\?\.\s+(.+?)\s*$")
+#: Section heading, tolerating ``**bold**``-wrapped variants some contributors
+#: produce when filling the template in a different editor
+#: (``## **2\\. Open Source ...**``).
+SECTION_HEADING_RE = re.compile(r"^##\s+\*{0,2}(\d)\\?\.\s+(.+?)\s*\*{0,2}$")
 #: Matches a table separator row such as ``| :---- | :---- |`` (after space removal).
 SEPARATOR_ROW_RE = re.compile(r"^(\|:?-+:?)+\|$")
 #: Matches a fully italic line (helper prompts).
@@ -132,10 +135,14 @@ def _parse_content_section(
     """Capture a Sections 2-9 block, preserving its structure verbatim."""
     row_indices = _table_row_indices(lines, head_idx + 1, next_idx)
     if not row_indices:
+        # Variant reports sometimes leave a section as a heading plus prose
+        # with no table at all; keep it as an empty (header-less) section so
+        # parsing never crashes and its prose stays outside the spec span.
         return SectionSpec(
             number=number,
             heading=raw_heading,
             title=_heading_title(raw_heading),
+            header_row="",
             start_line=head_idx,
             end_line=head_idx + 1,
         )

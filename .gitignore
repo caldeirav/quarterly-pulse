@@ -225,7 +225,16 @@ __marimo__/
 # MLflow default artifact directory (accidental local runs)
 mlruns/
 
-# QBR Architect: scratch input directory and generated decks
+# Operational files: inputs and generated artifacts never belong in git.
+#   docs/        — input documents for `populate` (confidential)
+#   out/         — generated reports, caches, and QBR decks
+#   qbr-reports/ — populated reports aggregated by `qbr`
+docs/
+out/
 qbr-reports/
+# Safety nets for artifacts written outside their default directories.
+qp-cache.json
+*_populated.md
 *_QBR.pptx
 *_QBR_sources.md
+qbr-content.json

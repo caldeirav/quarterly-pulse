@@ -150,9 +150,26 @@ class TestLoadTeamReports:
         assert [report.path.name for report in reports] == [
             "alice-populated.md",
             "bob-populated.md",
+            "carol-populated.md",
         ]
         contributors = {report.profile.name_role for report in reports}
-        assert contributors == {"Alice Tan, Principal Architect", "Bob Singh, Senior Field Architect"}
+        assert "Carol Diaz - Principal Architect" in contributors  # bold-heading variant, unescaped
+
+    def test_contributor_names_cleaned_for_attribution(self) -> None:
+        """Emphasis and role suffixes never leak into attribution."""
+        reports = _reports()
+        carol = next(report for report in reports if report.path.stem == "carol-populated")
+        assert {row.contributor for row in carol.rows} == {"Carol Diaz"}
+
+    def test_bold_heading_variant_report_is_aggregated(self) -> None:
+        """``## **2\\. ...**`` headings, plain field labels, and table-less
+        sections parse like the canonical format instead of being dropped."""
+        reports = _reports()
+        carol = next(report for report in reports if report.path.stem == "carol-populated")
+        row_sections = {row.section for row in carol.rows}
+        assert {2, 3, 4, 6, 7, 8, 9} <= row_sections
+        # The table-less section 5 contributes no rows but does not crash.
+        assert 5 not in row_sections
 
     def test_rows_parsed_with_ids_and_placeholder_rows_skipped(self) -> None:
         reports = _reports()
@@ -172,6 +189,10 @@ class TestLoadTeamReports:
         assert len(manifest) == sum(len(report.rows) for report in _reports())
         assert manifest["bob-populated-s8-00"].detail.startswith("Unsponsored")
         assert manifest["bob-populated-s8-00"].columns[0].startswith("Type")
+        # Markdown links in cells collapse to bare URLs; escapes are cleared.
+        carol_repo = manifest["carol-populated-s2-00"]
+        assert carol_repo.links == "https://github.com/variant-labs/parser-tolerances"
+        assert "\\:" not in carol_repo.links and "](" not in carol_repo.links
 
 
 class TestPlanInterview:

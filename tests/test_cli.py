@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -131,7 +132,7 @@ class TestEndToEndOffline:
         assert "openai:gpt-4o" in text
         assert "Report rows per section" in text
 
-    def test_default_output_written_to_cwd(
+    def test_default_output_written_to_out_dir(
         self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
     ) -> None:
         _install_fakes(monkeypatch, docs_dir, _e2e_report())
@@ -149,7 +150,7 @@ class TestEndToEndOffline:
         )
 
         assert result.exit_code == 0, result.output
-        assert (tmp_path / "quarterly-template_populated.md").is_file()
+        assert (tmp_path / "out" / "quarterly-template_populated.md").is_file()
 
     def test_handle_overrides_passed_to_connectors(
         self, tmp_path: Path, docs_dir: Path, template_path: Path, monkeypatch
@@ -416,7 +417,7 @@ class TestQbrCommand:
         monkeypatch.setattr(cli_module, "init_chat_model", lambda model_id: fake_model)
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.delenv("LLM_MODEL", raising=False)
-        return runner.invoke(app, ["qbr", *args])
+        return runner.invoke(app, ["qbr", "make", *args])
 
     def test_qbr_writes_deck_and_companion(
         self,
@@ -447,7 +448,7 @@ class TestQbrCommand:
         assert "source rows" in result.output
         # The config file's leader/org reached the deck (via synthesized content check).
         deck_text = str(result.output)
-        assert "2 report(s)" in deck_text
+        assert "3 report(s)" in deck_text
 
     def test_qbr_interview_answers_flow_into_synthesis(
         self,
@@ -484,6 +485,7 @@ class TestQbrCommand:
             app,
             [
                 "qbr",
+                "make",
                 "--reports-dir", str(qbr_reports_dir),
                 "--pptx", str(qbr_template_path),
                 "--output", str(deck),
@@ -554,3 +556,135 @@ class TestQbrCommand:
         )
         assert result.exit_code == 2
         assert "review quarter" in result.output
+
+
+class TestQbrAgentCommands:
+    """The agent-driven steps: rows, schema, render (no LLM anywhere)."""
+
+    def test_rows_emits_config_and_row_inventory(
+        self, tmp_path: Path, qbr_reports_dir: Path, monkeypatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["qbr", "rows", "--reports-dir", str(qbr_reports_dir)])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["config"]["leader"] == "Priya Nair"
+        assert payload["config"]["review_quarter"] == "Q3 2026"
+        row_ids = {row["row_id"] for row in payload["rows"]}
+        assert "alice-populated-s2-00" in row_ids
+        assert "bob-populated-s8-00" in row_ids
+        row = next(r for r in payload["rows"] if r["row_id"] == "alice-populated-s2-00")
+        assert row["contributor"] == "Alice Tan"
+        assert row["columns"]  # column headers travel with the rows
+
+    def test_schema_emits_valid_json_schema(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["qbr", "schema"])
+
+        assert result.exit_code == 0, result.output
+        schema = json.loads(result.output)
+        assert schema["title"] == "QbrContent"
+        assert "highlights" in schema["properties"]
+        assert schema["properties"]["highlights"]["maxItems"] == 3
+
+    def test_render_fills_deck_from_content_json(
+        self,
+        tmp_path: Path,
+        qbr_reports_dir: Path,
+        qbr_template_path: Path,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        from tests.test_qbr import _content
+
+        content_path = tmp_path / "qbr-content.json"
+        content_path.write_text(_content().model_dump_json(indent=1), encoding="utf-8")
+        deck = tmp_path / "agent-deck.pptx"
+
+        result = runner.invoke(
+            app,
+            [
+                "qbr", "render",
+                "--content", str(content_path),
+                "--reports-dir", str(qbr_reports_dir),
+                "--pptx", str(qbr_template_path),
+                "--output", str(deck),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert deck.is_file()
+        assert (tmp_path / "agent-deck_sources.md").is_file()
+        assert "source rows" in result.output
+
+    def test_render_rejects_invalid_content(
+        self,
+        tmp_path: Path,
+        qbr_reports_dir: Path,
+        qbr_template_path: Path,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        from tests.test_qbr import SlotItem
+
+        # Four highlights exceed the template's three slots.
+        bad = {
+            "org_team": "Team",
+            "leader_identity": "Leader",
+            "highlights": [
+                SlotItem(title=f"H{index}", detail="d").model_dump() for index in range(4)
+            ],
+            "statement_of_impact": "impact",
+            "execution_metadata": "meta",
+            "guardrails_metadata": "meta",
+            "action_metadata": "meta",
+            "decision_date": "Date to confirm",
+            "agreement_date": "Date to confirm",
+        }
+        content_path = tmp_path / "bad.json"
+        content_path.write_text(json.dumps(bad), encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            [
+                "qbr", "render",
+                "--content", str(content_path),
+                "--reports-dir", str(qbr_reports_dir),
+                "--pptx", str(qbr_template_path),
+            ],
+        )
+
+        assert result.exit_code == 2
+        assert "not a valid QbrContent" in result.output
+        assert "qbr schema" in result.output
+
+    def test_render_warns_on_unknown_citations(
+        self,
+        tmp_path: Path,
+        qbr_reports_dir: Path,
+        qbr_template_path: Path,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        from tests.test_qbr import _content
+
+        content = _content()
+        content.highlights[0].source_row_ids = ["nonexistent-report-s9-99"]
+        content_path = tmp_path / "qbr-content.json"
+        content_path.write_text(content.model_dump_json(indent=1), encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            [
+                "qbr", "render",
+                "--content", str(content_path),
+                "--reports-dir", str(qbr_reports_dir),
+                "--pptx", str(qbr_template_path),
+                "--output", str(tmp_path / "warned.pptx"),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output  # warning, not failure
+        assert "nonexistent-report-s9-99" in result.output
+        assert "Fix the unknown source_row_ids" in result.output

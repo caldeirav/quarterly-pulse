@@ -60,6 +60,18 @@ uv sync
 cp .env.example .env   # then fill in your keys
 ```
 
+## Operational files
+
+Inputs and generated artifacts never belong in git; each has a designated
+directory (all gitignored), and the commands default to them so the
+repository root stays clean:
+
+| Directory | Role |
+| :--- | :--- |
+| `docs/` | Input documents for `populate` (`.md`, `.txt`, `.pdf`, `.docx`, `.pptx`, LinkedIn exports). |
+| `out/` | Generated artifacts: populated reports (`out/<template>_populated.md`), gather caches, QBR decks with companion records, and the agent-written `qbr-content.json`. |
+| `qbr-reports/` | Populated reports aggregated by `qbr`, plus an optional `qbr-config.yaml`. |
+
 ## Usage
 
 Two commands: `populate` fills a quarterly activity log; `qbr` builds a
@@ -93,17 +105,17 @@ extracted and regenerate only the report:
 
 ```bash
 # First run: gathers all sources, writes the cache, generates the report.
-uv run quarterly-pulse --template templates/quarterly-template.md \
-  --docs-dir ./docs --start-date 2026-07-01 --cache qp-cache.json
+uv run quarterly-pulse populate --template templates/quarterly-template.md \
+  --docs-dir ./docs --start-date 2026-07-01 --cache out/qp-cache.json
 
 # Later runs: connectors are skipped entirely; only synthesis + rendering run
 # (seconds, no Apify credit, no GitHub API calls).
-uv run quarterly-pulse --template templates/quarterly-template.md \
-  --docs-dir ./docs --start-date 2026-07-01 --cache qp-cache.json
+uv run quarterly-pulse populate --template templates/quarterly-template.md \
+  --docs-dir ./docs --start-date 2026-07-01 --cache out/qp-cache.json
 
 # When your sources actually changed: re-gather and overwrite the cache.
-uv run quarterly-pulse --template templates/quarterly-template.md \
-  --docs-dir ./docs --start-date 2026-07-01 --cache qp-cache.json --refresh
+uv run quarterly-pulse populate --template templates/quarterly-template.md \
+  --docs-dir ./docs --start-date 2026-07-01 --cache out/qp-cache.json --refresh
 ```
 
 The cache stores every gathered `ActivityItem`, the strategy and warnings per
@@ -124,35 +136,59 @@ run-by-run, so bold titles, regular details, and the lowlights' red
 `Mitigation:` runs keep the template's fonts and colors.
 
 ```bash
-uv run quarterly-pulse qbr --reports-dir ./qbr-reports
+uv run quarterly-pulse qbr make --reports-dir ./qbr-reports
 ```
+
+| Command | Purpose |
+| :--- | :--- |
+| `qbr make` | End-to-end: interview (LLM), synthesize, render. |
+| `qbr rows` | Emit the aggregated row inventory (`row_id` per row) and resolved deck config as JSON. |
+| `qbr render` | Fill the template from a validated `qbr-content.json` — no LLM. |
+| `qbr schema` | Emit the JSON Schema for `qbr-content.json`. |
 
 | Flag | Required | Description |
 | :--- | :--- | :--- |
 | `--reports-dir` | yes | Directory of populated reports (`*.md`), plus an optional `qbr-config.yaml`. |
 | `--pptx` | no | QBR PPTX template; defaults to `skills/qbr-architect/assets/qbr-template.pptx`. |
-| `--output` | no | Output `.pptx`; defaults to `<org>_<review-quarter>_QBR.pptx`. |
-| `--model` | no | LangChain model override; defaults to `LLM_MODEL`. |
+| `--output` | no | Output `.pptx`; defaults to `out/<org>_<review-quarter>_QBR.pptx`. |
+| `--model` | no | LangChain model override (`make` only); defaults to `LLM_MODEL`. |
 | `--leader` / `--org` | no | Override the leader / organization from `qbr-config.yaml`. |
 | `--review-quarter` / `--preview-quarter` | no | Quarter labels (e.g. `Q3 2026`); preview rolls over from review (Q4 → Q1). |
-| `--no-interview` | no | Skip the clarifying interview and draft with gaps noted. |
+| `--no-interview` | no | `make` only: skip the clarifying interview and draft with gaps noted. |
 
 Deck metadata comes from a `qbr-config.yaml` beside the reports (leader, org,
 review/preview quarters); flags override, and the review quarter falls back to
 the reports' Section 1 consensus when every report agrees. Nothing is inferred
 from filenames or today's date.
 
-**Clarifying interview.** By default the CLI plans up to 10 prioritized
-questions from the gaps the reports leave against the four-slide contract and
-asks them one at a time (`unknown`, `skip`, and `draft` are valid answers;
-after 10 it offers continue-or-draft). `--no-interview` drafts directly, and a
-non-interactive stdin skips the interview with a warning.
+**Clarifying interview (`make`).** By default the CLI plans up to 10
+prioritized questions from the gaps the reports leave against the four-slide
+contract and asks them one at a time (`unknown`, `skip`, and `draft` are
+valid answers; after 10 it offers continue-or-draft). `--no-interview`
+drafts directly, and a non-interactive stdin skips the interview with a
+warning.
 
-**Grounding.** The LLM cites source row IDs, never URLs; the renderer resolves
-those IDs into locators from the parsed reports, so slide links cannot be
-fabricated. Speaker notes carry source locators, objective/KR mappings, stop
-linkages, and contributor attribution; a companion `<deck>_sources.md` record
-lists unresolved gaps by slide.
+**Agent-driven execution (OpenCode).** The skill is registered with OpenCode
+via `opencode.jsonc` (`"skills": ["./skills"]`), so in an OpenCode session you
+can say `@qbr-architect produce my QBR` and the agent runs the judgment steps
+itself — no API key needed:
+
+1. `quarterly-pulse qbr rows --reports-dir ./qbr-reports` — the agent reads
+   the row inventory; `row_id`s are the only citation vocabulary.
+2. It asks the clarifying questions in chat, following the skill's interview
+   rules.
+3. It writes `out/qbr-content.json` (validated against `qbr schema`) citing
+   `row_id`s — never URLs, which the renderer resolves into locators.
+4. `quarterly-pulse qbr render --content out/qbr-content.json
+   --reports-dir ./qbr-reports` fills the deck deterministically and prints
+   warnings (unknown citations, unfilled prompts) the agent fixes and
+   re-renders until clean.
+
+**Grounding.** The synthesizer (LLM or agent) cites source row IDs, never
+URLs; the renderer resolves those IDs into locators from the parsed reports,
+so slide links cannot be fabricated. Speaker notes carry source locators,
+objective/KR mappings, stop linkages, and contributor attribution; a
+companion `<deck>_sources.md` record lists unresolved gaps by slide.
 
 ## Configuration
 

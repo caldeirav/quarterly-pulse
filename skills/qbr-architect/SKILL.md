@@ -16,14 +16,50 @@ This file is portable: a leader can attach it, the PPTX template, and their
 context to an LLM and say, "Follow these instructions to create my QBR." It
 does not require a particular provider, connector, or programming library. If
 skill installation is supported, it may also be used as an installed skill.
-The `quarterly-pulse qbr` CLI implements this same contract deterministically
-for the aggregation case: it reads every populated quarterly report in a
-source directory, runs the interview in the terminal, and fills the deck.
+The `quarterly-pulse qbr make` CLI runs the same contract end-to-end with its
+own LLM; the `rows`, `render`, and `schema` subcommands plus the agent
+execution section below let an coding agent (e.g. OpenCode) drive the
+judgment steps while the deck fill stays deterministic.
 
 Produce exactly four slides, populated with the leader's actual work,
 preserving the template's fixed section headings and formatting. The example
 topics inside brackets are prompts, not facts or mandatory initiative
 categories. Do not invent work to fill them.
+
+## Agent execution (coding agents with shell access)
+
+When you are a coding agent working inside the quarterly-pulse repository
+(this skill is registered there via `opencode.jsonc`), do not hand-edit the
+PPTX and do not call another LLM: you are the synthesis model. Drive the
+deterministic tools instead:
+
+1. **Inventory.** Run `uv run quarterly-pulse qbr rows --reports-dir
+   ./qbr-reports` (add `--leader` / `--org` / `--review-quarter` /
+   `--preview-quarter` overrides when no `qbr-config.yaml` is present). Read
+   the emitted JSON: it carries the resolved deck configuration and every
+   source row with its `row_id` — the only citation vocabulary allowed in
+   `source_row_ids`.
+2. **Interview.** Ask the clarifying questions one at a time in the
+   conversation, following section 3: number them, keep to the 10-question
+   budget, accept `unknown` / `skip` / `draft`, and offer continue-or-draft
+   when the budget is exhausted. Derive the questions from the gaps between
+   the row inventory and the four-slide contract.
+3. **Content.** Write `out/qbr-content.json` conforming to the `QbrContent`
+   schema — run `uv run quarterly-pulse qbr schema` for the current shape.
+   Cite `row_id`s for every slot and never write URLs yourself (the renderer
+   resolves citations into links, so links cannot be fabricated). Respect
+   the slot capacities and record gaps instead of inventing content.
+4. **Render.** Run `uv run quarterly-pulse qbr render --content
+   out/qbr-content.json --reports-dir ./qbr-reports`. The command validates
+   the JSON, checks every citation against the source manifest, fills the
+   template in place, writes the speaker notes and companion record, and
+   prints warnings for unknown citations or unfilled prompts.
+5. **Iterate.** Fix the warnings in the content JSON and re-render until
+   clean — rendering is fast, deterministic, and needs no LLM. Then deliver
+   per section 7; the deck lands in `out/` by default.
+
+The end-to-end `uv run quarterly-pulse qbr make` command remains for
+no-agent runs: it performs steps 2–4 with its own LLM and terminal prompts.
 
 ## 1. Intake and capability check
 
