@@ -221,8 +221,9 @@ def _split_row(line: str) -> list[str] | None:
     """Split a Markdown table row into cells; None for non-row lines.
 
     Splits on unescaped pipes (reusing the template parser's row splitter),
-    then clears markdown escapes (``https\\://``, ``\\-``, ``\\|``) so
-    titles, details, and link locators read cleanly downstream.
+    clears markdown escapes (``https\\://``, ``\\-``, ``\\|``), and unwraps
+    whole-cell emphasis (``*text*``, ``**text**``) that some editors leave
+    behind, so titles, details, and link locators read cleanly downstream.
     """
     stripped = line.strip()
     if not stripped.startswith("|"):
@@ -230,7 +231,16 @@ def _split_row(line: str) -> list[str] | None:
     cells = split_table_row(stripped)
     if len(cells) < 2:
         return None
-    return [unescape_markdown(cell).strip() for cell in cells]
+    return [_strip_cell_emphasis(unescape_markdown(cell)).strip() for cell in cells]
+
+
+_FULL_CELL_EMPHASIS_RE = re.compile(r"^\*{1,3}(.+?)\*{1,3}$")
+
+
+def _strip_cell_emphasis(cell: str) -> str:
+    """Unwrap emphasis only when it wraps the WHOLE cell (editor noise)."""
+    match = _FULL_CELL_EMPHASIS_RE.match(cell.strip())
+    return match.group(1).strip() if match else cell.strip()
 
 
 def _unwrap_markdown_links(cell: str) -> str:
@@ -240,12 +250,13 @@ def _unwrap_markdown_links(cell: str) -> str:
 
 def _is_placeholder(cells: list[str]) -> bool:
     """True for template example rows and copy/paste placeholders."""
-    joined = " ".join(cells)
+    joined = " ".join(cells).lstrip("*_ ").strip()
+    lowered = joined.lower()
     return (
-        not any(cells)
-        or joined.startswith("*e.g.")
-        or "Copy/paste row to add" in joined
-        or joined.startswith("*Enter")
+        not joined
+        or lowered.startswith("e.g")
+        or "copy/paste row to add" in lowered
+        or joined.startswith("Enter")
     )
 
 
@@ -363,6 +374,10 @@ class QbrSynthesisResult(BaseModel):
     rows_received: int = 0
     rows_for_synthesis: int = 0
     chunked: bool = False
+    backfilled_count: int = Field(
+        default=0,
+        description="Slide 3/4 items auto-added from unused section 8/9 seeds after thin synthesis.",
+    )
     grounding_warnings: list[str] = Field(default_factory=list)
 
 
@@ -385,8 +400,16 @@ Rules:
   outcomes and evidence, lowlight consequences and recovery, objective/KR
   alignment, must-win owner/target/date, stop-list trade-offs, or
   decision owner/blocker/date for asks.
-- Never ask the leader to repeat facts already visible in the inventory or
-  configuration.
+- DIVERSITY: never ask about the same initiative, topic, or gap twice — not
+  even from a different angle. Before writing a question, check that no
+  earlier question in this plan already covers it.
+- Spread the questions across what the four slides need: slide 1 impact
+  evidence and lowlight recovery, slide 2 objective/KR alignment, slide 3
+  must-win owners/targets/dates and stop-list trade-offs, slide 4 ask
+  owners/blockers/dates. When one answer would serve several slides, ask it
+  once.
+- The inventory already describes the team's work; gaps worth asking about
+  are missing owners, dates, numbers, and choices — not the work itself.
 - Material gaps only: skip anything that does not affect an executive
   decision on slides 1-4.
 - Number nothing; write each question self-contained and answerable with
@@ -436,7 +459,28 @@ SLOT RULES:
 - Titles are concise names (<= 60 chars); details are ONE sentence (<= 220 chars). No Markdown formatting inside fields.
 - Statement of impact: a short supported statement of overall quarter impact.
 - Record unresolved material gaps in gaps (slide number, slot, what is missing) instead of leaving example text.
-- When the leader answered interview questions, those answers outrank the parsed rows."""
+- When the leader answered interview questions, those answers outrank the parsed rows.
+
+SLIDE 3 AND 4 SEEDING (critical — never leave these slides thin):
+- The dedicated seed block in the prompt (sections 7, 8, 9 of every
+  contributor) is the primary source for slides 3 and 4: each must-win,
+  opportunity, and stop seed becomes a candidate commitment / opportunity /
+  stop; each help-needed and radar seed becomes a candidate ask, interlock,
+  or radar entry; each unresolved challenge with a mitigation becomes a
+  lowlight AND an executive ask.
+- Populate every column UP TO ITS CAPACITY when the seeds support it: merge
+  near-duplicate seeds about the same initiative, but keep distinct
+  initiatives as distinct slots. A one-item column next to a dozen unused
+  seeds is a synthesis failure; leave a slot empty only when nothing
+  grounded or clearly derivable supports it.
+- Beyond the seeds, PROPOSE commitments, opportunities, stops, asks, and
+  radar entries derived from the quarter's activity: work with momentum to
+  continue or ship next quarter, customer engagements to follow up,
+  activities to stop or deprioritize to free capacity, and plausible
+  escalations where leadership help is needed. These are proposals the
+  leader will edit; mark unstated owners/dates as 'to confirm' — never
+  invent them.
+- Prefer coverage across contributors and topics over depth on one theme."""
 
 
 SYNTHESIS_PROMPT = ChatPromptTemplate.from_messages(
@@ -458,6 +502,14 @@ Contributor reports:
 
 Activity rows (JSON, with row_id for citations):
 {records}
+
+Seed rows for slides 3 and 4 — sections 7 (challenges), 8 (looking ahead),
+and 9 (help needed & radar) of every contributor, repeated from the records
+above for salience. These are the must-win, opportunity, stop, ask,
+interlock, and radar candidates; section 8 rows carry their type in the
+first cell (Must-Win Priority / Emerging Opportunity / Stop / Deprioritize)
+and section 9 rows carry Help Needed / Escalation or Team Heads-Up / Radar:
+{seeds}
 
 Map these into the four-slide QBR following the output schema.""",
         ),
@@ -554,8 +606,18 @@ async def synthesize_qbr(
                 for report in reports
             ),
             "records": _records_json(records),
+            "seeds": _records_json(
+                [record for record in records if record.get("section") in (7, 8, 9)]
+            ),
         }
     )
+
+    # Deterministic backstop: the model reliably under-fills slides 3 and 4
+    # on large quarters no matter how the prompt begs; the typed section 8/9
+    # rows are unambiguous seeds, so anything unused is appended to its
+    # column marked 'to confirm' (mirrors the quarterly synthesizer's
+    # Section 6 backstop).
+    backfilled = _backfill_thin_columns(content, rows)
 
     warnings = validate_row_citations(content, source_manifest(reports))
     return QbrSynthesisResult(
@@ -563,6 +625,7 @@ async def synthesize_qbr(
         rows_received=len(rows),
         rows_for_synthesis=len(records),
         chunked=chunked,
+        backfilled_count=backfilled,
         grounding_warnings=warnings,
     )
 
@@ -595,6 +658,114 @@ _SLOT_FIELDS = (
     "interlocks",
     "radar",
 )
+
+#: Slot capacities for the backfillable slide 3/4 columns.
+_COLUMN_CAPACITY = {
+    "commitments": 4,
+    "opportunities": 4,
+    "stops": 4,
+    "asks": 2,
+    "interlocks": 2,
+    "radar": 3,
+}
+
+#: Typed section 8/9 label -> candidate slide 3/4 columns, in preference
+#: order: help-needed seeds fill asks first, then interlocks.
+_SEED_COLUMN_RES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (r"must[- ]?win", ("commitments",)),
+    (r"emerging|opportunit", ("opportunities",)),
+    (r"stop|deprioriti", ("stops",)),
+    (r"help needed|escalation", ("asks", "interlocks")),
+    (r"radar|heads[- ]?up", ("radar",)),
+)
+
+
+def _backfill_thin_columns(content: QbrContent, rows: list[ReportRow]) -> int:
+    """Append unused typed seeds to under-filled slide 3/4 columns.
+
+    A seed is used when its row_id is cited by any slot or its initiative
+    text already appears in the generated slots; unused seeds become slots
+    in the first candidate column with room (help-needed seeds fall back
+    from asks to interlocks), marked for the leader to confirm.
+    Returns how many slots were added.
+    """
+    placed_ids = _placed_row_ids(content)
+    placed_text = _normalize(" ".join(_slot_texts(content)))
+    added = 0
+    for row in rows:
+        candidates = _seed_columns(row)
+        if not candidates:
+            continue
+        field = next(
+            (f for f in candidates if len(getattr(content, f)) < _COLUMN_CAPACITY[f]),
+            None,
+        )
+        if field is None:
+            continue
+        if row.row_id in placed_ids:
+            continue
+        initiative = _strip_emphasis(row.detail or "").strip()
+        lowered = initiative.lower()
+        if (
+            not initiative
+            or lowered in {"n/a", "na", "none", "tbd"}
+            or lowered.startswith("e.g.")
+        ):
+            continue
+        normalized = _normalize(initiative)
+        if normalized in placed_text:
+            continue
+        placed_ids.add(row.row_id)
+        placed_text += " " + normalized
+        getattr(content, field).append(
+            SlotItem(
+                title=_clip(initiative, 60),
+                detail=(
+                    f"Proposed from {row.contributor}'s looking-ahead input; "
+                    "owner and date to confirm."
+                ),
+                source_row_ids=[row.row_id],
+                contributor=row.contributor,
+                stop_link="Trade-off to confirm" if field == "commitments" else "",
+            )
+        )
+        added += 1
+    return added
+
+
+def _seed_columns(row: ReportRow) -> tuple[str, ...]:
+    """Candidate slide 3/4 columns for a typed section 8/9 row, if any."""
+    if row.section not in (8, 9):
+        return ()
+    label = _strip_emphasis(row.title).lower()
+    for pattern, fields in _SEED_COLUMN_RES:
+        if re.search(pattern, label):
+            return fields
+    return ()
+
+
+def _placed_row_ids(content: QbrContent) -> set[str]:
+    ids: set[str] = set()
+    for field in _SLOT_FIELDS:
+        for slot in getattr(content, field):
+            ids.update(slot.source_row_ids)
+    return ids
+
+
+def _slot_texts(content: QbrContent) -> list[str]:
+    texts: list[str] = []
+    for field in _SLOT_FIELDS:
+        for slot in getattr(content, field):
+            texts.extend((slot.title, slot.detail))
+    return texts
+
+
+def _strip_emphasis(text: str) -> str:
+    return re.sub(r"[*_`]+", "", text or "")
+
+
+def _normalize(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
 
 
 # ---------------------------------------------------------------------------

@@ -432,7 +432,7 @@ def make(
     typer.echo(
         f"Wrote {outputs.deck} and {outputs.companion.name} "
         f"({synthesis.rows_received} source rows, {synthesis.rows_for_synthesis} synthesized, "
-        f"{len(synthesis.content.gaps)} gaps recorded)."
+        f"{synthesis.backfilled_count} backfilled, {len(synthesis.content.gaps)} gaps recorded)."
     )
 
 

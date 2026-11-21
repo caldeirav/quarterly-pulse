@@ -43,7 +43,7 @@ No external engagements this quarter; focused on customer delivery.
 
 | Challenge or Blocker | What Happened & Impact | Mitigation / Next Step & Links |
 | :---- | :---- | :---- |
-| Sandbox quota exhaustion | Demo environment throttled during the Globex discovery. | Quota doubled; owner: Carol. |
+| Sandbox quota exhaustion | *Demo environment throttled during the Globex discovery.* | Quota doubled; owner: Carol. |
 
 ## **8\. Looking Ahead to Next Quarter**
 

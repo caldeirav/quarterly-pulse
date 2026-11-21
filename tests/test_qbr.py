@@ -189,10 +189,13 @@ class TestLoadTeamReports:
         assert len(manifest) == sum(len(report.rows) for report in _reports())
         assert manifest["bob-populated-s8-00"].detail.startswith("Unsponsored")
         assert manifest["bob-populated-s8-00"].columns[0].startswith("Type")
-        # Markdown links in cells collapse to bare URLs; escapes are cleared.
+        # Markdown links in cells collapse to bare URLs; escapes and
+        # whole-cell emphasis are cleared.
         carol_repo = manifest["carol-populated-s2-00"]
         assert carol_repo.links == "https://github.com/variant-labs/parser-tolerances"
         assert "\\:" not in carol_repo.links and "](" not in carol_repo.links
+        carol_challenge = manifest["carol-populated-s7-00"]
+        assert carol_challenge.detail == "Demo environment throttled during the Globex discovery."
 
 
 class TestPlanInterview:
@@ -245,6 +248,9 @@ class TestSynthesizeQbr:
         human = list(prompt.messages)[1].content
         assert "Who owns the stop list?" in human
         assert "Priya Nair" in human
+        # Sections 7-9 rows get a dedicated high-salience seed block.
+        assert "Seed rows for slides 3 and 4" in human
+        assert human.count("bob-populated-s7-00") >= 2  # in records and seeds
 
     async def test_unknown_row_citations_flagged_not_fatal(
         self, fake_model: StructuredFakeChatModel
@@ -264,6 +270,56 @@ class TestSynthesizeQbr:
 
         assert len(result.grounding_warnings) == 1
         assert "alice-populated-s9-99" in result.grounding_warnings[0]
+
+    async def test_thin_slide34_columns_backfilled_from_unused_seeds(
+        self, fake_model: StructuredFakeChatModel
+    ) -> None:
+        """The model under-filling slides 3/4 is backstopped deterministically.
+
+        Unused typed section 8/9 seeds are appended to their column marked
+        'to confirm'; cited seeds are never duplicated, capacities are
+        respected, and help-needed seeds fall back from a full asks column
+        to interlocks. Fixture seeds: alice/carol must-wins and help-needed
+        asks, bob's stop (cited by the model slot here) and radar row."""
+        # The model returns thin content: one commitment citing bob's stop
+        # seed and a full asks column citing alice's help-needed seed.
+        content = _content(
+            commitments=[
+                SlotItem(
+                    title="Harness engineering",
+                    detail="Already placed by the model.",
+                    source_row_ids=["bob-populated-s8-00"],
+                )
+            ],
+            asks=[
+                SlotItem(
+                    title="ASA support",
+                    detail="Already placed by the model.",
+                    source_row_ids=["alice-populated-s9-00"],
+                ),
+                SlotItem(title="Second ask", detail="Already placed by the model."),
+            ],
+            gaps=[],
+        )
+        fake_model.scripted = {"QbrContent": [content]}
+
+        result = await synthesize_qbr(_config(), _reports(), [], fake_model)
+
+        c = result.content
+        # alice + carol must-wins -> commitments; carol's help-needed seed
+        # falls back to interlocks (asks full); bob's radar row -> radar.
+        assert result.backfilled_count == 4
+        assert len(c.commitments) == 3  # model slot + two backfilled must-wins
+        assert len(c.asks) == 2  # the model's asks, untouched
+        assert len(c.interlocks) == 1  # help-needed seed routed to interlocks
+        assert len(c.radar) == 1
+        # bob's stop was cited by the model slot: never duplicated.
+        assert len(c.stops) == 0
+        # Backfilled slots are grounded and marked for confirmation.
+        backfilled = c.commitments[1:] + c.interlocks + c.radar
+        assert all(item.source_row_ids for item in backfilled)
+        assert all("to confirm" in item.detail for item in backfilled)
+        assert any("Trade-off to confirm" == item.stop_link for item in c.commitments)
 
     async def test_large_context_triggers_chunked_distillation(
         self,

@@ -171,6 +171,9 @@ class TestRenderQbrDeck:
         prs = Presentation(str(deck))
         notes = prs.slides[0].notes_slide.notes_text_frame.text
         assert "Acme Corp renewal unblocked" in notes
+        # The source rows' actual content is the narrative, not just locators.
+        assert "technical win unblocking the $450K renewal" in notes
+        assert "Alice Tan — Acme Corp (Financial Services): Completed 3-week architecture sprint" in notes
         assert "customer-poc-readout.md" in notes
         assert "Contributor: Alice Tan" in notes
 
@@ -189,6 +192,8 @@ class TestRenderQbrDeck:
         assert "Slide 3 — Looking Ahead" in companion
         assert "No stop linkage supplied." in companion
         assert "[alice-populated-s4-00]" in companion
+        # Source narratives (the rows' own content) back every cited slot.
+        assert "technical win unblocking the $450K renewal" in companion
 
     def test_date_fields_filled_on_slide_4(
         self, tmp_path: Path, qbr_template_path: Path

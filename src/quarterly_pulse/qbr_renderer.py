@@ -268,6 +268,12 @@ def _quarter_token(label: str | None, default: str) -> str:
 
 
 def _write_notes(slide, slide_index: int, content, manifest: dict[str, ReportRow]) -> None:
+    """Speaker notes: the slot's supporting narrative from the source rows.
+
+    The slide carries one-sentence summaries; the notes carry the actual
+    source content (who did what, with what outcome) so the presenter can
+    speak to each slot, plus the mappings and locators.
+    """
     fields = _SLIDE_SLOTS[slide_index]
     lines: list[str] = []
     for field, _capacity in fields:
@@ -277,25 +283,50 @@ def _write_notes(slide, slide_index: int, content, manifest: dict[str, ReportRow
             lines.append(f"• {slot.title}")
             if slot.contributor:
                 lines.append(f"  Contributor: {slot.contributor}")
+            for entry in _source_lines(slot, manifest, detail_clip=400):
+                lines.append(f"  {entry}")
             if slot.objective_kr:
                 lines.append(f"  Objective/KR: {slot.objective_kr}")
             if slot.stop_link:
                 lines.append(f"  Stop linkage: {slot.stop_link}")
-            for locator in _locators(slot, manifest):
-                lines.append(f"  Source: {locator}")
     if lines:
         slide.notes_slide.notes_text_frame.text = "\n".join(lines)
 
 
-def _locators(slot: SlotItem, manifest: dict[str, ReportRow]) -> list[str]:
-    locators: list[str] = []
+def _source_lines(slot: SlotItem, manifest: dict[str, ReportRow], detail_clip: int) -> list[str]:
+    """Narrative lines for a slot's cited rows: contributor, work, outcome, locator.
+
+    Section 8/9 rows carry a type label in their title cell (e.g. 'Must-Win
+    Priority') and the initiative in the detail, so they read as
+    'contributor (must-win): initiative' instead of echoing the label.
+    """
+    lines: list[str] = []
     for row_id in slot.source_row_ids:
         row = manifest.get(row_id)
         if row is None:
             continue
-        locator = row.links or f"{row.contributor}: {row.title}"
-        locators.append(f"[{row.row_id}] {locator}")
-    return locators
+        narrative = _clip(row.detail, detail_clip) if row.detail else ""
+        if row.section in (8, 9):
+            kind = _clip(_strip_emphasis(row.title), 40)
+            entry = f"{row.contributor} ({kind}): {narrative or 'no detail provided'}"
+        else:
+            entry = f"{row.contributor} — {row.title}"
+            if narrative:
+                entry += f": {narrative}"
+        lines.append(entry)
+        if row.links:
+            lines.append(f"Source: [{row.row_id}] {row.links}")
+    return lines
+
+
+def _strip_emphasis(text: str) -> str:
+    return re.sub(r"[*_`]+", "", text or "")
+
+
+def _clip(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rsplit(" ", 1)[0] + "…"
 
 
 # ---------------------------------------------------------------------------
@@ -320,8 +351,7 @@ def render_qbr_companion(
         f" {result.rows_for_synthesis} (chunked pre-summarization:"
         f" {'yes' if result.chunked else 'no'})",
         "",
-        "## Deck metadata",
-        "",
+        "## Deck metadata",        "",
         f"- Leader: {config.leader or 'Leader to confirm'}",
         f"- Org / team: {config.org or 'Team to confirm'}",
         f"- Review quarter: {config.review_quarter or 'to confirm'}",
@@ -349,8 +379,8 @@ def render_qbr_companion(
                     lines.append(f"  - Objective/KR: {slot.objective_kr}")
                 if slot.stop_link:
                     lines.append(f"  - Stop linkage: {slot.stop_link}")
-                for locator in _locators(slot, manifest):
-                    lines.append(f"  - Source: {locator}")
+                for entry in _source_lines(slot, manifest, detail_clip=400):
+                    lines.append(f"  - Source: {entry}")
         lines.append("")
 
     lines += ["## Unresolved gaps", ""]
@@ -360,6 +390,15 @@ def render_qbr_companion(
     else:
         lines.append("- None recorded.")
     lines.append("")
+
+    if result.backfilled_count:
+        lines += [
+            "## Completeness backstop",
+            "",
+            f"- {result.backfilled_count} slide 3/4 item(s) were auto-added from unused"
+            " section 8/9 seeds (marked 'to confirm'); re-place or edit them manually.",
+            "",
+        ]
 
     if result.grounding_warnings:
         lines += ["## Grounding warnings", ""]

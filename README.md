@@ -186,9 +186,13 @@ itself — no API key needed:
 
 **Grounding.** The synthesizer (LLM or agent) cites source row IDs, never
 URLs; the renderer resolves those IDs into locators from the parsed reports,
-so slide links cannot be fabricated. Speaker notes carry source locators,
-objective/KR mappings, stop linkages, and contributor attribution; a
-companion `<deck>_sources.md` record lists unresolved gaps by slide.
+so slide links cannot be fabricated. Speaker notes carry the cited rows'
+actual content (contributor, work, outcome, locators) plus objective/KR
+mappings, stop linkages, and attribution; a companion `<deck>_sources.md`
+record lists unresolved gaps by slide. When the model under-fills the slide
+3/4 columns on large teams, a deterministic backstop appends the unused
+typed section 8/9 seeds to their columns marked `to confirm` — the same
+guarantee philosophy as the quarterly report's completeness backstop.
 
 ## Configuration
 
