@@ -374,9 +374,9 @@ class QbrSynthesisResult(BaseModel):
     rows_received: int = 0
     rows_for_synthesis: int = 0
     chunked: bool = False
-    backfilled_count: int = Field(
+    retry_filled_count: int = Field(
         default=0,
-        description="Slide 3/4 items auto-added from unused section 8/9 seeds after thin synthesis.",
+        description="Slide items the LLM coverage retry added to under-filled columns.",
     )
     grounding_warnings: list[str] = Field(default_factory=list)
 
@@ -450,7 +450,8 @@ TEAM VOICE:
 - Write from the leader's point of view ('we'), concise and candid, executive tone. Attribute items to contributors only via the contributor field (speaker notes), never in slot text.
 
 SLOT RULES:
-- Respect capacities: 3 highlights, 3 lowlights, 4 items per pillar (slide 2), 4 per column (slide 3), 2 asks, 2 interlocks, 3 radar (slide 4). Never fabricate entries to reach capacity; omit what is unsupported.
+- Respect capacities: 3 highlights, 3 lowlights, 4 items per pillar (slide 2), 4 per column (slide 3), 2 asks, 2 interlocks, 3 radar (slide 4).
+- The deliverable is a FULL template: populate every slot the sources support. AGGREGATE rows about the same initiative, customer, or topic into ONE slot citing all their row_ids; keep distinct initiatives as distinct slots. PRIORITIZE what an executive audience cares about — outcomes, momentum, customer impact — and decide the narrative. Never pad with unsupported content, and never leave a supported slot empty: an unnecessarily sparse slide is as much a failure as a fabricated one.
 - Example topics in the source rows' sections are prompts, not mandatory categories: pick the strongest distinct outcomes for highlights (customer/deal influence, program/technical delivery, ecosystem/enablement adapted to actual scope).
 - Lowlights: name what missed, cause and business consequence; the mitigation field carries a specific corrective action with recovery timing or owner ('Unknown owner' beats an invented one).
 - Slide 2: every populated item maps to a supplied annual objective / team KR in objective_kr; leave '' when the sources do not state one — never invent a strategic objective.
@@ -529,6 +530,57 @@ STRICT RULES:
 - Do not drop any rows; each must appear in the output.""",
         ),
         ("human", "Activity rows (JSON):\n{records}\n\nReturn the distilled rows."),
+    ]
+)
+
+
+RETRY_SYSTEM = """You complete an under-filled quarterly business review draft.
+
+The first synthesis pass left slide columns below their slot capacity even
+though source rows support more items. Fill them with the leader's actual
+work — the deliverable is a FULL template.
+
+Rules:
+- AGGREGATE: candidate rows about the same initiative, customer, or topic
+  become ONE slot citing all their row_ids. Distinct initiatives stay
+  distinct slots.
+- PRIORITIZE: pick what an executive audience cares about — outcomes,
+  momentum, customer impact — over exhaustive coverage, and decide the
+  narrative.
+- NARRATIVE: bold slot name (<= 60 chars) plus ONE outcome-focused sentence
+  (<= 220 chars), team voice, no Markdown formatting.
+- Fill each listed field up to its capacity from the candidates; leave a
+  slot empty only when nothing grounded supports it.
+- Return ONLY the new items for the listed fields; never repeat items
+  already in the draft.
+- Cite source_row_ids from the candidates; never invent facts, owners,
+  dates, or numbers — mark unstated owners/dates as 'to confirm'.
+- Commitments carry stop_link ('Trade-off to confirm' when no stop funds
+  them); slide 2 items carry objective_kr ('' when unstated)."""
+
+
+RETRY_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", RETRY_SYSTEM),
+        (
+            "human",
+            """Deck configuration:
+- Leader: {leader}
+- Org / team: {org}
+- Review quarter: {review_quarter}
+- Preview quarter: {preview_quarter}
+
+Current draft (JSON):
+{draft}
+
+Under-filled fields (field: current count / capacity):
+{thin}
+
+Candidate source rows not yet cited (JSON):
+{candidates}
+
+Return only the new items for the under-filled fields.""",
+        ),
     ]
 )
 
@@ -612,12 +664,11 @@ async def synthesize_qbr(
         }
     )
 
-    # Deterministic backstop: the model reliably under-fills slides 3 and 4
-    # on large quarters no matter how the prompt begs; the typed section 8/9
-    # rows are unambiguous seeds, so anything unused is appended to its
-    # column marked 'to confirm' (mirrors the quarterly synthesizer's
-    # Section 6 backstop).
-    backfilled = _backfill_thin_columns(content, rows)
+    # Coverage retry: thin columns are detected deterministically, but the
+    # LLM does the filling — it aggregates similar topics, prioritizes for
+    # an executive audience, and writes the new slots from the uncited
+    # candidate rows (mirrors the quarterly synthesizer's retry pass).
+    retry_filled = await _retry_thin_columns(content, rows, config, model)
 
     warnings = validate_row_citations(content, source_manifest(reports))
     return QbrSynthesisResult(
@@ -625,7 +676,7 @@ async def synthesize_qbr(
         rows_received=len(rows),
         rows_for_synthesis=len(records),
         chunked=chunked,
-        backfilled_count=backfilled,
+        retry_filled_count=retry_filled,
         grounding_warnings=warnings,
     )
 
@@ -659,8 +710,13 @@ _SLOT_FIELDS = (
     "radar",
 )
 
-#: Slot capacities for the backfillable slide 3/4 columns.
-_COLUMN_CAPACITY = {
+#: Slot capacities per field (the template's fixed layout).
+_FIELD_CAPACITY = {
+    "highlights": 3,
+    "lowlights": 3,
+    "pillar_programs": 4,
+    "pillar_customers": 4,
+    "pillar_ecosystem": 4,
     "commitments": 4,
     "opportunities": 4,
     "stops": 4,
@@ -669,79 +725,104 @@ _COLUMN_CAPACITY = {
     "radar": 3,
 }
 
-#: Typed section 8/9 label -> candidate slide 3/4 columns, in preference
-#: order: help-needed seeds fill asks first, then interlocks.
-_SEED_COLUMN_RES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    (r"must[- ]?win", ("commitments",)),
-    (r"emerging|opportunit", ("opportunities",)),
-    (r"stop|deprioriti", ("stops",)),
-    (r"help needed|escalation", ("asks", "interlocks")),
-    (r"radar|heads[- ]?up", ("radar",)),
-)
+#: Report sections that can supply items for each slot field.
+_FIELD_SOURCE_SECTIONS = {
+    "highlights": (2, 3, 4, 5, 6),
+    "lowlights": (7,),
+    "pillar_programs": (2, 3, 6),
+    "pillar_customers": (4,),
+    "pillar_ecosystem": (3, 5),
+    "commitments": (7, 8),
+    "opportunities": (7, 8),
+    "stops": (7, 8),
+    "asks": (7, 9),
+    "interlocks": (7, 9),
+    "radar": (9,),
+}
 
 
-def _backfill_thin_columns(content: QbrContent, rows: list[ReportRow]) -> int:
-    """Append unused typed seeds to under-filled slide 3/4 columns.
+async def _retry_thin_columns(
+    content: QbrContent,
+    rows: list[ReportRow],
+    config: QbrConfig,
+    model: BaseChatModel,
+) -> int:
+    """LLM coverage retry for under-filled slot groups.
 
-    A seed is used when its row_id is cited by any slot or its initiative
-    text already appears in the generated slots; unused seeds become slots
-    in the first candidate column with room (help-needed seeds fall back
-    from asks to interlocks), marked for the leader to confirm.
-    Returns how many slots were added.
+    Detection is deterministic — which fields sit below capacity and which
+    rows remain uncited — but the judgment is the model's: it aggregates
+    similar topics, prioritizes for an executive audience, and writes the
+    new slots (mirrors the quarterly synthesizer's retry pass). Best
+    effort: on a retry failure the draft is delivered as-is. Returns how
+    many slots were added.
     """
+    thin = {
+        field: capacity
+        for field, capacity in _FIELD_CAPACITY.items()
+        if len(getattr(content, field)) < capacity
+    }
+    if not thin:
+        return 0
+
     placed_ids = _placed_row_ids(content)
-    placed_text = _normalize(" ".join(_slot_texts(content)))
-    added = 0
-    for row in rows:
-        candidates = _seed_columns(row)
-        if not candidates:
-            continue
-        field = next(
-            (f for f in candidates if len(getattr(content, f)) < _COLUMN_CAPACITY[f]),
-            None,
-        )
-        if field is None:
-            continue
-        if row.row_id in placed_ids:
-            continue
-        initiative = _strip_emphasis(row.detail or "").strip()
-        lowered = initiative.lower()
-        if (
-            not initiative
-            or lowered in {"n/a", "na", "none", "tbd"}
-            or lowered.startswith("e.g.")
-        ):
-            continue
-        normalized = _normalize(initiative)
-        if normalized in placed_text:
-            continue
-        placed_ids.add(row.row_id)
-        placed_text += " " + normalized
-        getattr(content, field).append(
-            SlotItem(
-                title=_clip(initiative, 60),
-                detail=(
-                    f"Proposed from {row.contributor}'s looking-ahead input; "
-                    "owner and date to confirm."
+    sections = {section for field in thin for section in _FIELD_SOURCE_SECTIONS[field]}
+    candidates = [
+        row
+        for row in rows
+        if row.section in sections
+        and row.row_id not in placed_ids
+        and (row.detail or "").strip()
+    ]
+    if not candidates:
+        return 0
+
+    try:
+        chain: Runnable = RETRY_PROMPT | model.with_structured_output(QbrContent)
+        retry = await chain.ainvoke(
+            {
+                "leader": config.leader or "Leader to confirm",
+                "org": config.org or "Team to confirm",
+                "review_quarter": config.review_quarter or "Quarter to confirm",
+                "preview_quarter": config.preview_quarter or "Next quarter",
+                "draft": content.model_dump_json(indent=1),
+                "thin": "\n".join(
+                    f"- {field}: {len(getattr(content, field))}/{capacity}"
+                    for field, capacity in thin.items()
                 ),
-                source_row_ids=[row.row_id],
-                contributor=row.contributor,
-                stop_link="Trade-off to confirm" if field == "commitments" else "",
-            )
+                "candidates": _records_json(_candidate_records(candidates)),
+            }
         )
-        added += 1
+    except Exception:  # best effort: the draft is still deliverable
+        return 0
+
+    added = 0
+    seen = {_normalize(text) for text in _slot_texts(content)}
+    for field, capacity in thin.items():
+        for item in getattr(retry, field):
+            if len(getattr(content, field)) >= capacity:
+                break
+            key = _normalize(item.title)
+            if not item.title or key in seen:
+                continue
+            seen.add(key)
+            getattr(content, field).append(item)
+            added += 1
     return added
 
 
-def _seed_columns(row: ReportRow) -> tuple[str, ...]:
-    """Candidate slide 3/4 columns for a typed section 8/9 row, if any."""
-    if row.section not in (8, 9):
-        return ()
-    label = _strip_emphasis(row.title).lower()
-    for pattern, fields in _SEED_COLUMN_RES:
-        if re.search(pattern, label):
-            return fields
-    return ()
+def _candidate_records(rows: list[ReportRow]) -> list[dict[str, Any]]:
+    """Compact JSON records for the retry prompt's candidate rows."""
+    return [
+        {
+            "row_id": row.row_id,
+            "contributor": row.contributor,
+            "section": row.section,
+            "title": row.title,
+            "detail": _clip(row.detail, 250),
+            "links": row.links,
+        }
+        for row in rows
+    ]
 
 
 def _placed_row_ids(content: QbrContent) -> set[str]:

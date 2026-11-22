@@ -26,6 +26,15 @@ preserving the template's fixed section headings and formatting. The example
 topics inside brackets are prompts, not facts or mandatory initiative
 categories. Do not invent work to fill them.
 
+The deliverable is a FULL template. Aggregate context items that describe the
+same initiative, customer, or topic into one slot (keeping the strongest
+facts and citing every source); keep distinct initiatives as distinct slots.
+Prioritize what an executive audience cares about — outcomes, momentum,
+customer impact — and decide the narrative. Never fabricate content to reach
+a slot capacity, and never leave a slot empty that the supplied context
+supports: an unnecessarily sparse slide is as much a failure as a fabricated
+one.
+
 ## Agent execution (coding agents with shell access)
 
 When you are a coding agent working inside the quarterly-pulse repository
@@ -47,8 +56,11 @@ deterministic tools instead:
 3. **Content.** Write `out/qbr-content.json` conforming to the `QbrContent`
    schema — run `uv run quarterly-pulse qbr schema` for the current shape.
    Cite `row_id`s for every slot and never write URLs yourself (the renderer
-   resolves citations into links, so links cannot be fabricated). Respect
-   the slot capacities and record gaps instead of inventing content.
+   resolves citations into links, so links cannot be fabricated). Fill every
+   slot the rows support: aggregate rows about the same initiative into one
+   slot citing all their row_ids, prioritize the executive-relevant items,
+   and keep distinct initiatives distinct — the deliverable is a full
+   template. Record genuine gaps instead of inventing content.
 4. **Render.** Run `uv run quarterly-pulse qbr render --content
    out/qbr-content.json --reports-dir ./qbr-reports`. The command validates
    the JSON, checks every citation against the source manifest, fills the
@@ -329,7 +341,8 @@ owners. Put supporting detail in speaker notes when supported, otherwise in
 the companion record. Do not shrink text until it becomes difficult to read
 or overflow a neighboring column.
 
-Do not fabricate entries to reach the slot capacity. When fewer items are
+Fill every slot the supplied context supports, by aggregating similar items
+and prioritizing the executive-relevant ones. When fewer items are
 supported, leave the unused slot boxes empty (cleared, not deleted); use
 "None reported" only if the leader confirms that there are none. For an
 unresolved material slot, use a short neutral label such as "Outcome to

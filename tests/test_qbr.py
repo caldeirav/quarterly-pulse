@@ -38,6 +38,13 @@ def _config() -> QbrConfig:
     return QbrConfig.load(QBR_FIXTURES)
 
 
+def _retry_response(**overrides) -> QbrContent:
+    """A valid coverage-retry response: metadata present, slots as given."""
+    values: dict = {"highlights": [], "lowlights": [], "gaps": []}
+    values.update(overrides)
+    return _content(**values)
+
+
 def _row(row_id: str, section: int = 5, contributor: str = "Alice Tan") -> ReportRow:
     return ReportRow(
         row_id=row_id,
@@ -235,7 +242,7 @@ class TestSynthesizeQbr:
     async def test_synthesis_receives_rows_config_and_answers(
         self, fake_model: StructuredFakeChatModel
     ) -> None:
-        fake_model.scripted = {"QbrContent": [_content()]}
+        fake_model.scripted = {"QbrContent": [_content(), _retry_response()]}
         answers = [{"question": "Who owns the stop list?", "answer": "Priya"}]
 
         result = await synthesize_qbr(_config(), _reports(), answers, fake_model)
@@ -244,6 +251,7 @@ class TestSynthesizeQbr:
         assert result.rows_received == sum(len(r.rows) for r in _reports())
         assert result.chunked is False
         assert result.grounding_warnings == []
+        # First pass prompt carried the records, config, and answers.
         _, prompt = fake_model.inputs_seen[0]
         human = list(prompt.messages)[1].content
         assert "Who owns the stop list?" in human
@@ -251,6 +259,12 @@ class TestSynthesizeQbr:
         # Sections 7-9 rows get a dedicated high-salience seed block.
         assert "Seed rows for slides 3 and 4" in human
         assert human.count("bob-populated-s7-00") >= 2  # in records and seeds
+        # The thin draft triggered the coverage retry (second model call).
+        assert len(fake_model.inputs_seen) == 2
+        _, retry_prompt = fake_model.inputs_seen[1]
+        retry_human = list(retry_prompt.messages)[1].content
+        assert "Under-filled fields" in retry_human
+        assert "Candidate source rows" in retry_human
 
     async def test_unknown_row_citations_flagged_not_fatal(
         self, fake_model: StructuredFakeChatModel
@@ -264,26 +278,24 @@ class TestSynthesizeQbr:
                 )
             ]
         )
-        fake_model.scripted = {"QbrContent": [content]}
+        # Empty retry response: nothing added, draft delivered as-is.
+        fake_model.scripted = {"QbrContent": [content, _retry_response()]}
 
         result = await synthesize_qbr(_config(), _reports(), [], fake_model)
 
         assert len(result.grounding_warnings) == 1
         assert "alice-populated-s9-99" in result.grounding_warnings[0]
 
-    async def test_thin_slide34_columns_backfilled_from_unused_seeds(
+    async def test_thin_columns_filled_by_llm_coverage_retry(
         self, fake_model: StructuredFakeChatModel
     ) -> None:
-        """The model under-filling slides 3/4 is backstopped deterministically.
+        """Under-filled columns get a second LLM pass, not a script fill.
 
-        Unused typed section 8/9 seeds are appended to their column marked
-        'to confirm'; cited seeds are never duplicated, capacities are
-        respected, and help-needed seeds fall back from a full asks column
-        to interlocks. Fixture seeds: alice/carol must-wins and help-needed
-        asks, bob's stop (cited by the model slot here) and radar row."""
-        # The model returns thin content: one commitment citing bob's stop
-        # seed and a full asks column citing alice's help-needed seed.
-        content = _content(
+        The retry sees the draft, the thin field list, and the uncited
+        candidate rows; its aggregated and prioritized items are merged
+        with capacity caps and no duplicates. The model's judgment does
+        the filling — only the thinness detection is deterministic."""
+        first = _content(
             commitments=[
                 SlotItem(
                     title="Harness engineering",
@@ -291,35 +303,48 @@ class TestSynthesizeQbr:
                     source_row_ids=["bob-populated-s8-00"],
                 )
             ],
-            asks=[
-                SlotItem(
-                    title="ASA support",
-                    detail="Already placed by the model.",
-                    source_row_ids=["alice-populated-s9-00"],
-                ),
-                SlotItem(title="Second ask", detail="Already placed by the model."),
-            ],
             gaps=[],
         )
-        fake_model.scripted = {"QbrContent": [content]}
+        retry = _retry_response(
+            commitments=[
+                SlotItem(
+                    title="Ship RAG reference architecture v2",
+                    detail="GA target with 10 field teams onboarded.",
+                    source_row_ids=["alice-populated-s8-00"],
+                    contributor="Alice Tan",
+                ),
+                SlotItem(
+                    title="Convert Globex discovery to a paid pilot",
+                    detail="Signed pilot target by Q4 week 4.",
+                    source_row_ids=["carol-populated-s8-00"],
+                    contributor="Carol Diaz",
+                ),
+            ],
+            interlocks=[
+                SlotItem(
+                    title="Sandbox budget approval",
+                    detail="Platform Ops decision needed for Q4 pilots.",
+                    source_row_ids=["carol-populated-s9-00"],
+                    contributor="Carol Diaz",
+                ),
+            ],
+        )
+        fake_model.scripted = {"QbrContent": [first, retry]}
 
         result = await synthesize_qbr(_config(), _reports(), [], fake_model)
 
         c = result.content
-        # alice + carol must-wins -> commitments; carol's help-needed seed
-        # falls back to interlocks (asks full); bob's radar row -> radar.
-        assert result.backfilled_count == 4
-        assert len(c.commitments) == 3  # model slot + two backfilled must-wins
-        assert len(c.asks) == 2  # the model's asks, untouched
-        assert len(c.interlocks) == 1  # help-needed seed routed to interlocks
-        assert len(c.radar) == 1
-        # bob's stop was cited by the model slot: never duplicated.
-        assert len(c.stops) == 0
-        # Backfilled slots are grounded and marked for confirmation.
-        backfilled = c.commitments[1:] + c.interlocks + c.radar
-        assert all(item.source_row_ids for item in backfilled)
-        assert all("to confirm" in item.detail for item in backfilled)
-        assert any("Trade-off to confirm" == item.stop_link for item in c.commitments)
+        assert result.retry_filled_count == 3
+        assert len(c.commitments) == 3  # draft slot + two retry items
+        assert c.interlocks[0].title == "Sandbox budget approval"
+        # The retry prompt carried the draft, the thin fields, and the
+        # uncited candidates — the LLM chose from them.
+        _, retry_prompt = fake_model.inputs_seen[-1]
+        human = list(retry_prompt.messages)[1].content
+        assert "Under-filled fields" in human
+        assert "commitments: 1/4" in human
+        assert "carol-populated-s8-00" in human  # uncited candidate
+        assert "Harness engineering" in human  # the current draft
 
     async def test_large_context_triggers_chunked_distillation(
         self,
@@ -344,7 +369,7 @@ class TestSynthesizeQbr:
         )
         fake_model.scripted = {
             "DistilledRows": [distilled] + [DistilledRows() for _ in range(30)],
-            "QbrContent": [_content()],
+            "QbrContent": [_content(), _retry_response()],  # synthesis + empty retry
         }
 
         result = await synthesize_qbr(_config(), _reports(), [], fake_model)
@@ -352,5 +377,7 @@ class TestSynthesizeQbr:
         assert result.chunked is True
         assert result.rows_for_synthesis == 1
         # row_id survives distillation so citations stay resolvable.
-        _, final_prompt = fake_model.inputs_seen[-1]
-        assert "alice-populated-s2-00" in list(final_prompt.messages)[1].content
+        synthesis_prompts = [
+            prompt for name, prompt in fake_model.inputs_seen if name == "QbrContent"
+        ]
+        assert "alice-populated-s2-00" in list(synthesis_prompts[0].messages)[1].content

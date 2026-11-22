@@ -189,10 +189,11 @@ URLs; the renderer resolves those IDs into locators from the parsed reports,
 so slide links cannot be fabricated. Speaker notes carry the cited rows'
 actual content (contributor, work, outcome, locators) plus objective/KR
 mappings, stop linkages, and attribution; a companion `<deck>_sources.md`
-record lists unresolved gaps by slide. When the model under-fills the slide
-3/4 columns on large teams, a deterministic backstop appends the unused
-typed section 8/9 seeds to their columns marked `to confirm` — the same
-guarantee philosophy as the quarterly report's completeness backstop.
+record lists unresolved gaps by slide. The deliverable is a full template:
+the model aggregates rows on similar topics, prioritizes for an executive
+audience, and fills every slot the sources support — and when a first pass
+still leaves columns thin, a coverage retry sends the draft back with the
+uncited candidate rows so the model (not a script) completes the narrative.
 
 ## Configuration
 

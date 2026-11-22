@@ -391,12 +391,13 @@ def render_qbr_companion(
         lines.append("- None recorded.")
     lines.append("")
 
-    if result.backfilled_count:
+    if result.retry_filled_count:
         lines += [
-            "## Completeness backstop",
+            "## Coverage retry",
             "",
-            f"- {result.backfilled_count} slide 3/4 item(s) were auto-added from unused"
-            " section 8/9 seeds (marked 'to confirm'); re-place or edit them manually.",
+            f"- {result.retry_filled_count} slide item(s) were added by the LLM coverage"
+            " retry for under-filled columns (aggregated and prioritized from uncited"
+            " source rows); review them like any draft content.",
             "",
         ]
 

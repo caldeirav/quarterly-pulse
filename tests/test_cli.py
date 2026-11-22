@@ -412,8 +412,11 @@ class TestCaching:
 
 class TestQbrCommand:
     def _invoke_qbr(self, args: list[str], monkeypatch, content) -> object:
+        from tests.test_qbr import _retry_response
+
         fake_model = StructuredFakeChatModel(responses=["unused"])
-        fake_model.scripted = {"QbrContent": [content]}
+        # First response: synthesis; second: the coverage retry (empty).
+        fake_model.scripted = {"QbrContent": [content, _retry_response()]}
         monkeypatch.setattr(cli_module, "init_chat_model", lambda model_id: fake_model)
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.delenv("LLM_MODEL", raising=False)
@@ -496,9 +499,12 @@ class TestQbrCommand:
         assert result.exit_code == 0, result.output
         assert deck.is_file()
         assert "Question 1 of up to 2" in result.output
-        # The answers reached the synthesis prompt.
-        _, synthesis_prompt = fake_model.inputs_seen[-1]
-        human = list(synthesis_prompt.messages)[1].content
+        # The answers reached the synthesis prompt (the first QbrContent call;
+        # the second is the coverage retry, which carries the draft instead).
+        synthesis_prompts = [
+            prompt for name, prompt in fake_model.inputs_seen if name == "QbrContent"
+        ]
+        human = list(synthesis_prompts[0].messages)[1].content
         assert "Priya owns it" in human
         assert "stop the unsponsored POCs" in human
 
