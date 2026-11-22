@@ -1,16 +1,23 @@
 # quarterly-pulse
 
-AI agent CLI that automatically populates Markdown quarterly activity and
-impact logs from GitHub, LinkedIn, and local contributor documents filtered by
-a start date.
+AI agent CLI with two halves:
 
-Give it your quarterly template (see
+- **`populate`** — automatically fills a Markdown quarterly activity and
+  impact log from GitHub, LinkedIn, and local contributor documents filtered
+  by a start date.
+- **`qbr`** — aggregates a team's populated reports into an editable
+  four-slide executive QBR deck, either scripted (its own LLM + terminal
+  interview) or agent-driven (the `qbr-architect` OpenCode skill).
+
+Give `populate` your quarterly template (see
 [`templates/quarterly-template.md`](templates/quarterly-template.md)), a
 directory of documents you contributed, and a reporting window. The agent
 extracts your contributor profile from Section 1 of the template, gathers
 activity from all three sources concurrently, uses a LangChain-orchestrated
-LLM to deduplicate and map every activity into the right section, and writes a
-populated Markdown report with clean tables and a full audit footer.
+LLM to deduplicate and map every activity into the right section, and writes
+a populated Markdown report with clean tables and a full audit footer. Give
+`qbr` a directory of those populated reports and it produces the leader's
+deck with grounded speaker notes and a companion source record.
 
 ## How it works
 
@@ -31,7 +38,7 @@ template (.md) ──► parser ──► contributor profile + section schemas 
                     completeness retry pass, URL-grounding guardrail)
                                    ▼
                     renderer (template-preserving tables, pipe escaping,
-                    <details> audit footer) ──► <template>_populated.md
+                    <details> audit footer) ──► out/<template>_populated.md
 ```
 
 - **Degradation, not failure**: if a data source is unconfigured or
@@ -51,14 +58,53 @@ template (.md) ──► parser ──► contributor profile + section schemas 
   slightly truncated still count as grounded); anything ungrounded is stripped
   and reported. Pipes in cell text are escaped so tables always render.
 
-## Install
+## Install and dependencies
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+### System requirements
+
+- **Python 3.12+** and **[uv](https://docs.astral.sh/uv/)** — the only
+  supported package manager. `uv sync` creates the environment and installs
+  every Python dependency (typer, langchain, httpx, pypdf, python-docx,
+  python-pptx, pydantic-settings, pyyaml, and test tooling) from the
+  lockfile; never use `pip`/`poetry`/`conda` here.
+- **Git** — for the repository itself.
+- **[GitHub CLI](https://cli.github.com/)** (`gh`), optional — authenticated
+  via `gh auth login`, it replaces `GITHUB_TOKEN` for the GitHub connector.
+- **[OpenCode](https://opencode.ai/)**, optional — for the agent-driven QBR
+  path (`@qbr-architect`). The repository registers its skill bundle via
+  `opencode.jsonc`, so a session in this directory picks it up
+  automatically.
+
+### API keys, by command
+
+| Command | Hard requirements | Optional (each degrades gracefully) |
+| :--- | :--- | :--- |
+| `populate` | One LLM key — `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, matching `LLM_MODEL` | `GITHUB_TOKEN` **or** `gh` CLI (else GitHub is skipped with a warning); any LinkedIn strategy (else LinkedIn is skipped with a warning) |
+| `qbr make` | One LLM key (as above) | — |
+| `qbr rows` / `qbr render` / `qbr schema` | **None** — no LLM, no network | — |
+| OpenCode `@qbr-architect` | An OpenCode session with a configured model | No provider key is read by the CLI itself |
+
+Secondary data sources never crash a run: an unconfigured source logs a
+warning to stderr, is recorded in the audit footer, and the run continues
+with whatever remains. The LLM stage is the one hard dependency — without a
+key (or on a synthesis failure) the CLI exits non-zero with an actionable
+message and writes no partial output. LinkedIn gathering uses the first
+configured strategy of the [fallback chain](#linkedin-fallback-chain):
+Portability API token, a local export archive in `--docs-dir`, an Apify
+Actor (~$5 per 1,000 posts), ScrapeCreators, or Exa.
+
+### Install and verify
 
 ```bash
-uv sync
-cp .env.example .env   # then fill in your keys
+uv sync                              # environment + locked dependencies
+uv run pytest                        # offline suite (175 tests) — no keys needed
+uv run quarterly-pulse --help        # CLI surface: populate + qbr
+cp .env.example .env                 # then fill in the keys you want
 ```
+
+If `uv run pytest` passes and `--help` prints both commands, every Python
+dependency is correctly installed; the remaining variables are API keys,
+documented under [Configuration](#configuration).
 
 ## Operational files
 
@@ -71,6 +117,61 @@ repository root stays clean:
 | `docs/` | Input documents for `populate` (`.md`, `.txt`, `.pdf`, `.docx`, `.pptx`, LinkedIn exports). |
 | `out/` | Generated artifacts: populated reports (`out/<template>_populated.md`), gather caches, QBR decks with companion records, and the agent-written `qbr-content.json`. |
 | `qbr-reports/` | Populated reports aggregated by `qbr`, plus an optional `qbr-config.yaml`. |
+
+## Getting started
+
+### Workflow 1 — a contributor's quarterly report
+
+1. Fill Section 1 of `templates/quarterly-template.md` (name & role, team /
+   GEO, quarter, GitHub handle, LinkedIn profile, OKRs) and keep Sections
+   2–9 untouched — they are the schema.
+2. Drop the documents you contributed this quarter into `docs/`
+   (`.md`, `.txt`, `.pdf`, `.docx`, `.pptx`; a LinkedIn data export folder or
+   `.zip` also belongs here).
+3. Run the gather + synthesis (the cache makes later iterations fast):
+   ```bash
+   uv run quarterly-pulse populate \
+     --template templates/quarterly-template.md \
+     --docs-dir ./docs --start-date 2026-07-01 --cache out/qp-cache.json
+   ```
+4. Review `out/quarterly-template_populated.md`. The collapsible audit
+   footer at the end lists per-source strategies and item counts, rows per
+   section, any auto-added backstop rows, and every warning — read it to
+   see exactly what was gathered and what was skipped.
+5. Iterate on wording or try another `--model` by re-running the same
+   command: the cache skips the connectors entirely. When your sources
+   actually changed, re-gather with `--refresh`.
+
+### Workflow 2 — the leader's QBR deck
+
+1. Collect each team member's populated report as `.md` in `qbr-reports/`.
+   Reports from Workflow 1, hand-filled templates, or exports from other
+   tools all work — the parser tolerates editor variants (bold-wrapped
+   headings, plain field labels, emphasis-wrapped cells).
+2. Keep `qbr-reports/qbr-config.yaml` current (leader, org, review and
+   preview quarters — the preview rolls over Q4 → Q1 automatically):
+   ```yaml
+   leader: Vincent Caldeira
+   org: Field CTO Team APAC
+   review_quarter: Q3 2026
+   preview_quarter: Q4 2026
+   ```
+3. Produce the deck — scripted, with the clarifying interview in your
+   terminal (`unknown`, `skip`, and `draft` are valid answers):
+   ```bash
+   uv run quarterly-pulse qbr make --reports-dir ./qbr-reports
+   ```
+   …or agent-driven, in an OpenCode session in this repository:
+   ```
+   @qbr-architect produce my Q3 2026 QBR from ./qbr-reports
+   ```
+   The agent asks the interview in chat and drives `qbr rows` /
+   `qbr render` itself — no provider API key involved.
+4. Review `out/<org>_<quarter>_QBR.pptx`: the slides are fully editable,
+   speaker notes carry the cited rows' actual content plus KR mappings and
+   stop linkages, and `<deck>_sources.md` records unresolved gaps,
+   attribution, and the coverage-retry count. Edit the deck directly and
+   re-run only when the inputs change.
 
 ## Usage
 
@@ -93,7 +194,7 @@ uv run quarterly-pulse populate \
 | `--github` | no | Override the GitHub handle parsed from the template. |
 | `--linkedin` | no | Override the LinkedIn profile URL/handle parsed from the template. |
 | `--model` | no | LangChain model override (e.g. `openai:gpt-4o`, `anthropic:claude-sonnet-4-5`); defaults to `LLM_MODEL`. |
-| `--output` | no | Output `.md` path; defaults to `<template_name>_populated.md` in the current directory. |
+| `--output` | no | Output `.md` path; defaults to `out/<template_name>_populated.md`. |
 | `--cache` | no | JSON file caching everything the connectors extracted. When it exists, connectors are skipped and only the report is regenerated. |
 | `--refresh` | no | With `--cache`: re-gather from all sources, overwriting the cache. |
 
@@ -298,19 +399,27 @@ archive, sample documents); `.docx`/`.pptx`/`.pdf` fixtures are generated at
 runtime.
 
 ```
-src/quarterly_pulse/
-├── cli.py           # Typer entrypoint: populate + qbr commands, fail-loudly LLM setup
-├── config.py        # pydantic-settings (env / .env)
-├── models.py        # ActivityItem, ConnectorResult, TemplateProfile, audit schemas
-├── parser.py        # Section 1 extraction; Sections 2-9 schema capture
-├── synthesizer.py   # LangChain LCEL chains, QuarterReport, dedup, coverage retry, grounding
-├── renderer.py      # template-preserving table population, audit footer
-├── qbr.py           # QBR Architect core: aggregation, interview planning, QbrContent synthesis
-├── qbr_renderer.py  # in-place PPTX slot filling, speaker notes, companion record
-└── connectors/
-    ├── github.py    # GraphQL contributionsCollection + Search API + gh CLI
-    ├── linkedin.py  # prioritized fallback chain
-    └── docs.py      # local document scanner (pypdf/python-docx/python-pptx)
+.
+├── AGENTS.md               # agent directives for work in this repository
+├── opencode.jsonc          # registers skills/ with OpenCode sessions
+├── templates/              # quarterly-template.md (the schema)
+├── skills/qbr-architect/   # SKILL.md content contract + assets/qbr-template.pptx
+├── docs/                   # (gitignored) populate inputs
+├── qbr-reports/            # (gitignored) QBR inputs + qbr-config.yaml
+├── out/                    # (gitignored) generated reports, caches, decks
+└── src/quarterly_pulse/
+    ├── cli.py           # Typer entrypoint: populate + qbr commands, fail-loudly LLM setup
+    ├── config.py        # pydantic-settings (env / .env)
+    ├── models.py        # ActivityItem, ConnectorResult, TemplateProfile, audit schemas
+    ├── parser.py        # Section 1 extraction; Sections 2-9 schema capture
+    ├── synthesizer.py   # LangChain LCEL chains, QuarterReport, dedup, coverage retry, grounding
+    ├── renderer.py      # template-preserving table population, audit footer
+    ├── qbr.py           # QBR Architect core: aggregation, interview planning, QbrContent synthesis
+    ├── qbr_renderer.py  # in-place PPTX slot filling, speaker notes, companion record
+    └── connectors/
+        ├── github.py    # GraphQL contributionsCollection + Search API + gh CLI
+        ├── linkedin.py  # prioritized fallback chain
+        └── docs.py      # local document scanner (pypdf/python-docx/python-pptx)
 ```
 
 ## License
